@@ -107,12 +107,17 @@ class Launcher:
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = "menu"
+
         self.input_name = InputBox()
         self.create_btn = Button("CRÉER UNE PARTIE", GREEN, GREEN_H)
         self.join_btn = Button("REJOINDRE UNE PARTIE", BLUE, BLUE_H)
         self.back_btn = Button("RETOUR", RED, RED_H)
+        self.quit_btn = Button("QUITTER", RED, RED_H)
+
+
         self.discovery = ServerDiscovery()
         self.discovery.start()
+
         self.message = "Choisis ton nom puis crée ou rejoins une partie."
         self.hosted_server = None
         self.host_thread = None
@@ -132,15 +137,40 @@ class Launcher:
         name = self.input_name.text.strip()
         return name[:20] if name else "Joueur"
 
-    def launch_game(self, host):
-        size = self.screen.get_size()
-        game = WerewolfOnlineGame(host, self.valid_name())
-        game.run()
+    def reset_menu_state(self):
+        self.state = "menu"
+        self.selected_index = 0
+        self.row_rects = []
+        self.message = "Retour au menu."
+
+    def launch_game(self, host, shutdown_server_after=False):
+        current_size = self.screen.get_size()
+
+        try:
+            game = WerewolfOnlineGame(host, self.valid_name())
+            game.run()
+        except Exception as e:
+            self.message = f"Erreur pendant la partie : {e}"
+
         if not pygame.get_init():
             pygame.init()
-        self.screen = pygame.display.set_mode(size, pygame.RESIZABLE)
+        if not pygame.display.get_init():
+            pygame.display.init()
+
+        self.screen = pygame.display.set_mode(current_size, pygame.RESIZABLE)
         pygame.display.set_caption("Loup-Garou - Menu")
-        self.message = "Retour au menu."
+        self.clock = pygame.time.Clock()
+        pygame.event.clear()
+
+        if shutdown_server_after and self.hosted_server is not None:
+            try:
+                self.hosted_server.shutdown()
+            except Exception:
+                pass
+            self.hosted_server = None
+            self.host_thread = None
+
+        self.reset_menu_state()
 
     def create_server(self):
         if self.hosted_server is not None:
@@ -148,19 +178,28 @@ class Launcher:
                 self.hosted_server.shutdown()
             except Exception:
                 pass
+            self.hosted_server = None
+            self.host_thread = None
+
         self.hosted_server = WerewolfServer(host_name=self.valid_name())
-        self.host_thread = threading.Thread(target=self.hosted_server.serve_forever, daemon=True)
+        self.host_thread = threading.Thread(
+            target=self.hosted_server.serve_forever,
+            daemon=True
+        )
         self.host_thread.start()
         time.sleep(0.4)
-        self.launch_game("127.0.0.1")
+
+        self.launch_game("127.0.0.1", shutdown_server_after=True)
 
     def join_selected_server(self):
         servers = self.discovery.get_servers()
         if not servers:
             self.message = "Aucun serveur trouvé sur le réseau local."
             return
+
+        self.selected_index = max(0, min(self.selected_index, len(servers) - 1))
         host = servers[self.selected_index]["host"]
-        self.launch_game(host)
+        self.launch_game(host, shutdown_server_after=False)
 
     def menu_layout(self):
         w, h = self.screen.get_size()
@@ -168,6 +207,7 @@ class Launcher:
         self.input_name.set_rect((panel.x + 120, panel.y + 110, 400, 50))
         self.create_btn.set_rect((panel.x + 110, panel.y + 210, 420, 54))
         self.join_btn.set_rect((panel.x + 110, panel.y + 288, 420, 54))
+        self.quit_btn.set_rect((panel.x + 110, panel.y + 360, 420, 50))
         return panel
 
     def join_layout(self):
@@ -186,6 +226,7 @@ class Launcher:
         mouse = pygame.mouse.get_pos()
         self.create_btn.draw(self.screen, f["medium"], mouse)
         self.join_btn.draw(self.screen, f["medium"], mouse)
+        self.quit_btn.draw(self.screen, f["medium"], mouse)
         draw_text(self.screen, self.message, f["small"], WHITE, center=(panel.centerx, panel.bottom + 30))
 
     def draw_join(self):
@@ -193,21 +234,31 @@ class Launcher:
         panel = self.join_layout()
         draw_glass_panel(self.screen, panel)
         draw_text(self.screen, "Serveurs disponibles", f["big"], WHITE, center=(panel.centerx, panel.y + 50))
+
         self.row_rects = []
         y = panel.y + 110
         servers = self.discovery.get_servers()
+
         if not servers:
             draw_text(self.screen, "Aucun serveur trouvé.", f["medium"], WHITE, center=panel.center)
         else:
+            self.selected_index = max(0, min(self.selected_index, len(servers) - 1))
             for i, server in enumerate(servers):
                 rect = pygame.Rect(panel.x + 30, y, panel.width - 60, 58)
                 color = (80, 52, 100) if i == self.selected_index else (36, 28, 56)
                 pygame.draw.rect(self.screen, color, rect, border_radius=14)
                 pygame.draw.rect(self.screen, BUTTON_BORDER, rect, 1, border_radius=14)
                 draw_text(self.screen, server["name"], f["medium"], WHITE, topleft=(rect.x + 18, rect.y + 8))
-                draw_text(self.screen, f"{server['players']}/{server['max_players']} joueurs - {server['host']}", f["small"], CYAN, topleft=(rect.x + 18, rect.y + 30))
+                draw_text(
+                    self.screen,
+                    f"{server['players']}/{server['max_players']} joueurs - {server['host']}",
+                    f["small"],
+                    CYAN,
+                    topleft=(rect.x + 18, rect.y + 30)
+                )
                 self.row_rects.append((i, rect))
                 y += 68
+
         self.back_btn.draw(self.screen, f["small"], pygame.mouse.get_pos())
 
     def handle_menu_event(self, event):
@@ -217,20 +268,26 @@ class Launcher:
                 self.create_server()
             elif self.join_btn.is_clicked(event.pos):
                 self.state = "join"
+                self.selected_index = 0
+            elif self.quit_btn.is_clicked(event.pos):
+                self.running = False
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
             self.create_server()
 
     def handle_join_event(self, event):
         servers = self.discovery.get_servers()
+
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.back_btn.is_clicked(event.pos):
-                self.state = "menu"
+                self.reset_menu_state()
                 return
+
             for i, rect in self.row_rects:
                 if rect.collidepoint(event.pos):
                     self.selected_index = i
                     self.join_selected_server()
                     return
+
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.state = "menu"
@@ -245,22 +302,33 @@ class Launcher:
         while self.running:
             self.clock.tick(60)
             draw_vertical_gradient(self.screen, BG_TOP, BG_BOTTOM)
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif event.type == pygame.VIDEORESIZE:
-                    self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
+                    self.screen = pygame.display.set_mode(
+                        (max(MIN_W, event.w), max(MIN_H, event.h)),
+                        pygame.RESIZABLE
+                    )
                 elif self.state == "menu":
                     self.handle_menu_event(event)
                 else:
                     self.handle_join_event(event)
+
             if self.state == "menu":
                 self.draw_menu()
             else:
                 self.draw_join()
+
             pygame.display.flip()
+
         if self.hosted_server is not None:
-            self.hosted_server.shutdown()
+            try:
+                self.hosted_server.shutdown()
+            except Exception:
+                pass
+
         self.discovery.stop()
         pygame.quit()
 
