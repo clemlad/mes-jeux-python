@@ -23,9 +23,6 @@ clock = pygame.time.Clock()
 FPS = 60
 fullscreen = False
 
-# ──────────────────────────────────────────────
-#  COULEURS
-# ──────────────────────────────────────────────
 COL = {
     "bg":       (18, 14, 28),
     "bg2":      (28, 22, 42),
@@ -44,7 +41,7 @@ COL = {
     "heart":    (220, 50, 70),
     "spade":    (40, 40, 60),
     "club":     (40, 80, 50),
-    "diamond":  (200, 60, 60),
+    "diamond":  (60, 120, 255),   # BLEU
     "enhanced": (255, 215, 0),
     "btn":      (60, 50, 90),
     "btn_h":    (90, 75, 130),
@@ -52,16 +49,10 @@ COL = {
     "btn_disc": (160, 80, 30),
     "shop_bg":  (22, 18, 36),
     "joker_c":  (70, 60, 100),
-    "joker_r":  (30, 60, 120),
-    "joker_l":  (100, 60, 0),
-    # Raretes : Commun < Rare < Legendaire < Mystique (plus rare que tout)
     "mystique": (180, 0, 255),
     "troll":    (50, 200, 50),
 }
 
-# ──────────────────────────────────────────────
-#  FONTS
-# ──────────────────────────────────────────────
 def load_font(size, bold=False):
     try:
         return pygame.font.SysFont("dejavusans", size, bold=bold)
@@ -79,9 +70,6 @@ F = {
     "joker":  load_font(16, True),
 }
 
-# ──────────────────────────────────────────────
-#  ENUMS
-# ──────────────────────────────────────────────
 class Suit(Enum):
     HEART   = ("hearts",   "heart",   COL["heart"])
     DIAMOND = ("diamond",  "diamond", COL["diamond"])
@@ -93,19 +81,12 @@ class Suit(Enum):
         self.key    = key
         self.color  = color
 
-    @property
-    def display(self):
-        return {"hearts": "hearts", "diamond": "diamond",
-                "spade": "spade", "club": "club"}[self.symbol]
-
-# Use text symbols since emoji may not render
 SUIT_SYMBOLS = {
-    "hearts":  chr(9829),  # ♥
-    "diamond": chr(9830),  # ♦
-    "spade":   chr(9824),  # ♠
-    "club":    chr(9827),  # ♣
+    "hearts":  chr(9829),
+    "diamond": chr(9830),
+    "spade":   chr(9824),
+    "club":    chr(9827),
 }
-
 
 class Rank(Enum):
     TWO   = (2,  "2",  2)
@@ -127,7 +108,6 @@ class Rank(Enum):
         self.display   = display
         self.chip_val  = chip_val
 
-
 class HandRank(Enum):
     HIGH_CARD       = (1,  "Carte Haute",         5,   1.0)
     ONE_PAIR        = (2,  "Une Paire",           10,  2.0)
@@ -146,15 +126,9 @@ class HandRank(Enum):
         self.base_chips  = base_chips
         self.multiplier  = multiplier
 
-# ──────────────────────────────────────────────
-#  SURFACE DE RENDU INTERNE (toujours 1280x800)
-#  Le jeu se dessine sur render_surf, puis on
-#  scale vers la fenetre reelle.
-# ──────────────────────────────────────────────
 render_surf = pygame.Surface((W, H))
 
 def get_scale_offset():
-    """Retourne (scale, offset_x, offset_y) pour letterbox/pillarbox."""
     sw, sh = screen.get_size()
     scale = min(sw / W, sh / H)
     ox = (sw - W * scale) / 2
@@ -162,24 +136,18 @@ def get_scale_offset():
     return scale, ox, oy
 
 def screen_to_game(mx, my):
-    """Convertit les coordonnees souris ecran -> coordonnees jeu 1280x800."""
     scale, ox, oy = get_scale_offset()
-    gx = (mx - ox) / scale
-    gy = (my - oy) / scale
-    return int(gx), int(gy)
+    return int((mx - ox) / scale), int((my - oy) / scale)
 
-# Monkey-patch pygame.mouse.get_pos pour retourner les coords jeu
 _orig_mouse_get_pos = pygame.mouse.get_pos
 def _game_mouse_get_pos():
     mx, my = _orig_mouse_get_pos()
     return screen_to_game(mx, my)
 pygame.mouse.get_pos = _game_mouse_get_pos
 
-# Monkey-patch event.pos pour les MOUSEBUTTONDOWN/UP/MOTION
 def _patch_event_pos(event):
     if hasattr(event, 'pos'):
         gx, gy = screen_to_game(event.pos[0], event.pos[1])
-        # On cree un nouvel event avec pos corrigee
         d = event.__dict__.copy()
         d['pos'] = (gx, gy)
         return pygame.event.Event(event.type, d)
@@ -193,26 +161,19 @@ def toggle_fullscreen():
     else:
         screen = pygame.display.set_mode((W, H), pygame.RESIZABLE)
 
-# ──────────────────────────────────────────────
-#  BACKGROUND
-# ──────────────────────────────────────────────
 class BalatroBackground:
     def __init__(self):
         self.time  = 0.0
         self.orbs  = [self._new_orb() for _ in range(12)]
-        self.stars = [(random.randint(0,W), random.randint(0,H),
-                       random.uniform(0.3,1.0)) for _ in range(120)]
+        self.stars = [(random.randint(0,W), random.randint(0,H), random.uniform(0.3,1.0)) for _ in range(120)]
         self._grid = pygame.Surface((W,H), pygame.SRCALPHA)
-        for gx in range(0,W,48):
-            pygame.draw.line(self._grid,(255,255,255,8),(gx,0),(gx,H))
-        for gy in range(0,H,48):
-            pygame.draw.line(self._grid,(255,255,255,8),(0,gy),(W,gy))
+        for gx in range(0,W,48): pygame.draw.line(self._grid,(255,255,255,8),(gx,0),(gx,H))
+        for gy in range(0,H,48): pygame.draw.line(self._grid,(255,255,255,8),(0,gy),(W,gy))
 
     def _new_orb(self):
-        return {"x":random.uniform(0,W),"y":random.uniform(0,H),
-                "r":random.uniform(60,180),"vx":random.uniform(-0.3,0.3),
-                "vy":random.uniform(-0.2,0.2),"phase":random.uniform(0,math.tau),
-                "hue":random.choice([(120,50,200),(60,20,140),(200,50,100),(40,100,200)])}
+        return {"x":random.uniform(0,W),"y":random.uniform(0,H),"r":random.uniform(60,180),
+                "vx":random.uniform(-0.3,0.3),"vy":random.uniform(-0.2,0.2),
+                "phase":random.uniform(0,math.tau),"hue":random.choice([(120,50,200),(60,20,140),(200,50,100),(40,100,200)])}
 
     def update(self):
         self.time += 0.016
@@ -222,33 +183,24 @@ class BalatroBackground:
             if o["y"]<-200 or o["y"]>H+200: o["vy"]*=-1
 
     def draw(self, surf):
-        surf.fill(COL["bg"])
-        surf.blit(self._grid,(0,0))
-        orb = pygame.Surface((W,H),pygame.SRCALPHA)
+        surf.fill(COL["bg"]); surf.blit(self._grid,(0,0))
+        orb=pygame.Surface((W,H),pygame.SRCALPHA)
         for o in self.orbs:
-            p=0.7+0.3*math.sin(self.time*1.2+o["phase"])
-            r=int(o["r"]*p); cx,cy=int(o["x"]),int(o["y"])
+            p=0.7+0.3*math.sin(self.time*1.2+o["phase"]); r=int(o["r"]*p); cx,cy=int(o["x"]),int(o["y"])
             for st in range(4,0,-1):
                 f=st/4; a=int(30*f*p); sr=int(r*(2.0-f))
                 s2=pygame.Surface((sr*2,sr*2),pygame.SRCALPHA)
-                pygame.draw.circle(s2,(*o["hue"],a),(sr,sr),sr)
-                orb.blit(s2,(cx-sr,cy-sr))
+                pygame.draw.circle(s2,(*o["hue"],a),(sr,sr),sr); orb.blit(s2,(cx-sr,cy-sr))
         surf.blit(orb,(0,0))
         for (sx,sy,br) in self.stars:
-            tw=abs(math.sin(self.time*br*2)); a=int(40+80*tw*br)
-            rs=1 if br<0.6 else 2
+            tw=abs(math.sin(self.time*br*2)); a=int(40+80*tw*br); rs=1 if br<0.6 else 2
             s3=pygame.Surface((rs*2+2,rs*2+2),pygame.SRCALPHA)
-            pygame.draw.circle(s3,(220,200,255,a),(rs+1,rs+1),rs)
-            surf.blit(s3,(sx-rs,sy-rs))
+            pygame.draw.circle(s3,(220,200,255,a),(rs+1,rs+1),rs); surf.blit(s3,(sx-rs,sy-rs))
         vign=pygame.Surface((W,H),pygame.SRCALPHA)
         for i in range(0,200,8):
-            f=i/200; a=int(120*(1-f))
-            pygame.draw.rect(vign,(0,0,0,a),(i,i,W-2*i,H-2*i),8)
+            f=i/200; a=int(120*(1-f)); pygame.draw.rect(vign,(0,0,0,a),(i,i,W-2*i,H-2*i),8)
         surf.blit(vign,(0,0))
 
-# ──────────────────────────────────────────────
-#  HELPERS
-# ──────────────────────────────────────────────
 def draw_text(surf, text, font, color, x, y, center=False, right=False):
     s=font.render(text,True,color); r=s.get_rect()
     if center: r.center=(x,y)
@@ -267,9 +219,6 @@ def draw_border(surf, color, rect, width=2, radius=10):
 def lerp_color(c1,c2,t):
     return tuple(int(c1[i]+(c2[i]-c1[i])*t) for i in range(3))
 
-# ──────────────────────────────────────────────
-#  CARTE
-# ──────────────────────────────────────────────
 CARD_W, CARD_H = 72, 108
 
 class Card:
@@ -295,15 +244,13 @@ class Card:
         brd=COL["gold"] if self.selected else COL["card_brd"]
         draw_border(surf,brd,(x,y+ay,cw,ch),3 if self.selected else 1,8)
         sc=self.suit.color; rd=self.rank.display
-        fn=F["rank"] if not small else F["sm"]
-        fs=F["suit"] if not small else F["xs"]
+        fn=F["rank"] if not small else F["sm"]; fs=F["suit"] if not small else F["xs"]
         sym=SUIT_SYMBOLS[self.suit.symbol]
         draw_text(surf,rd,fn,sc,x+5,y+ay+4)
         draw_text(surf,sym,fs,sc,x+5,y+ay+4+fn.get_height()-2)
         draw_text(surf,sym,load_font(28 if not small else 20),sc,x+cw//2,y+ay+ch//2,center=True)
         draw_text(surf,rd,fn,sc,x+cw-5,y+ay+ch-4-fn.get_height()*2,right=True)
-        if self.enhanced:
-            draw_text(surf,"*",F["xs"],COL["enhanced"],x+cw-14,y+ay+4)
+        if self.enhanced: draw_text(surf,"*",F["xs"],COL["enhanced"],x+cw-14,y+ay+4)
         if self._hover and not self.selected:
             draw_border(surf,(200,200,100),(x-1,y+ay-1,cw+2,ch+2),1,9)
 
@@ -312,22 +259,13 @@ class Card:
 
 
 class WildcardJokerCard(Card):
-    """
-    Carte speciale injectee dans le deck par La Roulette.
-    - Wildcard : compte comme n'importe quelle carte pour les combos
-    - x6.7 chips ET mult quand elle participe au scoring
-    - 3% de chance de muter en carte TROLL a chaque tirage depuis le deck
-    - Ne peut PAS etre defaussee
-    """
     TROLL_CHANCE = 0.03
 
     def __init__(self):
         super().__init__(Rank.ACE, Suit.HEART)
-        self.is_joker_wildcard=True
-        self.is_troll=False
+        self.is_joker_wildcard=True; self.is_troll=False
 
     def check_troll_mutation(self):
-        """Appele au moment du tirage. Retourne True si vient de muter."""
         if not self.is_troll and random.random()<self.TROLL_CHANCE:
             self.is_troll=True; return True
         return False
@@ -336,10 +274,8 @@ class WildcardJokerCard(Card):
         cw=CARD_W if not small else 52; ch=CARD_H if not small else 78
         ay=int(self._anim_y)
         draw_rect_rounded(surf,(0,0,0),(x+3,y+ay+3,cw,ch),8,120)
-        if self.is_troll:
-            self._draw_troll(surf,x,y+ay,cw,ch)
-        else:
-            self._draw_wild(surf,x,y+ay,cw,ch)
+        if self.is_troll: self._draw_troll(surf,x,y+ay,cw,ch)
+        else: self._draw_wild(surf,x,y+ay,cw,ch)
         if self._hover and not self.selected:
             hc=COL["troll"] if self.is_troll else COL["mystique"]
             draw_border(surf,hc,(x-1,y+ay-1,cw+2,ch+2),1,9)
@@ -358,18 +294,14 @@ class WildcardJokerCard(Card):
         draw_border(surf,COL["troll"],(x,y,cw,ch),3,8)
         fx=x+cw//2; fy=y+ch//2-6
         pygame.draw.circle(surf,(100,180,80),(fx,fy),22)
-        # yeux
         pygame.draw.circle(surf,(255,255,255),(fx-8,fy-5),6)
         pygame.draw.circle(surf,(255,255,255),(fx+8,fy-5),6)
         pygame.draw.circle(surf,(0,0,0),(fx-6,fy-4),3)
         pygame.draw.circle(surf,(0,0,0),(fx+9,fy-4),3)
-        # sourcils troll
         pygame.draw.line(surf,(0,0,0),(fx-14,fy-14),(fx-2,fy-12),2)
         pygame.draw.line(surf,(0,0,0),(fx+2,fy-12),(fx+14,fy-14),2)
-        # sourire
         pts=[(fx-10,fy+10),(fx-5,fy+16),(fx,fy+18),(fx+5,fy+16),(fx+10,fy+10)]
         pygame.draw.lines(surf,(0,0,0),False,pts,2)
-        # nez
         pygame.draw.ellipse(surf,(150,100,70),(fx-5,fy+1,10,7))
         draw_text(surf,"XD",F["xs"],COL["troll"],x+cw//2,y+ch-14,center=True)
 
@@ -377,35 +309,54 @@ class WildcardJokerCard(Card):
         return pygame.Rect(x,y+int(self._anim_y),CARD_W,CARD_H)
 
 
-# ──────────────────────────────────────────────
-#  DECK
-# ──────────────────────────────────────────────
+class PoissonDegueulasse(Card):
+    CURSE_CHANCE = 0.15
+
+    def __init__(self):
+        super().__init__(Rank.TWO, Suit.CLUB)
+        self.is_poisson=True; self.is_joker_wildcard=False
+
+    def draw(self, surf, x, y, small=False):
+        cw=CARD_W if not small else 52; ch=CARD_H if not small else 78; ay=int(self._anim_y)
+        draw_rect_rounded(surf,(0,0,0),(x+3,y+ay+3,cw,ch),8,120)
+        bg=(180,210,160) if not self.selected else (220,255,180)
+        draw_rect_rounded(surf,bg,(x,y+ay,cw,ch),8)
+        brd=COL["gold"] if self.selected else (80,140,60)
+        draw_border(surf,brd,(x,y+ay,cw,ch),3 if self.selected else 2,8)
+        fx=x+cw//2; fy=y+ay+ch//2-4
+        pygame.draw.ellipse(surf,(60,120,80),(fx-18,fy-9,36,18))
+        pygame.draw.polygon(surf,(60,120,80),[(fx+18,fy),(fx+28,fy-10),(fx+28,fy+10)])
+        pygame.draw.circle(surf,(255,255,255),(fx-6,fy-2),4)
+        pygame.draw.circle(surf,(0,0,0),(fx-5,fy-2),2)
+        pygame.draw.circle(surf,(100,160,80),(fx-18,fy-14),3)
+        pygame.draw.circle(surf,(100,160,80),(fx-12,fy-18),2)
+        draw_text(surf,"FORCE",F["xs"],(60,140,60),x+cw//2,y+ay+ch-14,center=True)
+        if self._hover and not self.selected:
+            draw_border(surf,(150,220,100),(x-1,y+ay-1,cw+2,ch+2),1,9)
+
+    def get_rect(self,x,y):
+        return pygame.Rect(x,y+int(self._anim_y),CARD_W,CARD_H)
+
+
 class Deck:
     def __init__(self):
         self._wildcard: Optional[WildcardJokerCard] = None
-        self._poisson: Optional[PoissonDegueulasse] = None
         self.cards: list[Card] = []
         self.reset()
 
     def reset(self):
         self.cards=[Card(r,s) for s in Suit for r in Rank]
-        # Wildcard persiste entre les rounds
         if self._wildcard is not None:
             new_wc=WildcardJokerCard()
             new_wc.is_troll=self._wildcard.is_troll
             self._wildcard=new_wc
             self.cards.append(new_wc)
-        # Le Poisson Degueulasse est TOUJOURS dans le deck
-        poisson=PoissonDegueulasse()
-        self._poisson=poisson
-        self.cards.append(poisson)
+        self.cards.append(PoissonDegueulasse())
         random.shuffle(self.cards)
 
     def add_wildcard(self):
-        wc=WildcardJokerCard()
-        self._wildcard=wc
-        self.cards.append(wc)
-        random.shuffle(self.cards)
+        wc=WildcardJokerCard(); self._wildcard=wc
+        self.cards.append(wc); random.shuffle(self.cards)
 
     def draw(self, n=1) -> list[Card]:
         result=[]
@@ -414,8 +365,7 @@ class Deck:
                 card=self.cards.pop()
                 if isinstance(card,WildcardJokerCard):
                     card.check_troll_mutation()
-                    if card.is_troll and self._wildcard:
-                        self._wildcard.is_troll=True
+                    if card.is_troll and self._wildcard: self._wildcard.is_troll=True
                 result.append(card)
         return result
 
@@ -423,37 +373,26 @@ class Deck:
     def has_wildcard(self): return self._wildcard is not None
 
 
-# ──────────────────────────────────────────────
-#  EVALUATEUR
-# ──────────────────────────────────────────────
 class HandEvaluator:
-
     @staticmethod
     def evaluate(cards: list[Card]) -> tuple[HandRank, list[Card]]:
         wildcards=[c for c in cards if isinstance(c,WildcardJokerCard)]
-        normals  =[c for c in cards if not isinstance(c,WildcardJokerCard)]
-
-        if not wildcards:
-            return HandEvaluator._eval(normals)
-
-        # Avec wildcard : teste toutes substitutions, garde la meilleure
-        best_hr, best_sc = HandEvaluator._eval(normals)
+        normals=[c for c in cards if not isinstance(c,WildcardJokerCard)]
+        if not wildcards: return HandEvaluator._eval(normals)
+        best_hr,best_sc=HandEvaluator._eval(normals)
         for sub_r in Rank:
             for sub_s in Suit:
-                fake=Card(sub_r,sub_s)
-                test=normals+[fake]
+                fake=Card(sub_r,sub_s); test=normals+[fake]
                 hr,sc=HandEvaluator._eval(test)
                 if hr.rank_order>best_hr.rank_order:
-                    best_hr=hr
-                    best_sc=[wildcards[0] if c is fake else c for c in sc]
-        return best_hr, best_sc
+                    best_hr=hr; best_sc=[wildcards[0] if c is fake else c for c in sc]
+        return best_hr,best_sc
 
     @staticmethod
     def _eval(cards: list[Card]) -> tuple[HandRank, list[Card]]:
         if not cards: return HandRank.HIGH_CARD,[]
         sorted_c=sorted(cards,key=lambda c:c.rank.rank_val,reverse=True)
-        ranks=[c.rank.rank_val for c in sorted_c]
-        suits=[c.suit for c in sorted_c]
+        ranks=[c.rank.rank_val for c in sorted_c]; suits=[c.suit for c in sorted_c]
         rg={}
         for c in sorted_c: rg.setdefault(c.rank.rank_val,[]).append(c)
         groups=sorted(rg.values(),key=lambda g:(len(g),g[0].rank.rank_val),reverse=True)
@@ -482,28 +421,17 @@ class HandEvaluator:
         return HandRank.HIGH_CARD,[sorted_c[0]]
 
     @staticmethod
-    def score(hr: HandRank, scoring: list[Card], jokers: list,
-              game_ref=None) -> tuple[int, float]:
-        chips=hr.base_chips; mult=hr.multiplier
-        troll_loss=0
+    def score(hr: HandRank, scoring: list[Card], jokers: list, game_ref=None) -> tuple[int, float]:
+        chips=hr.base_chips; mult=hr.multiplier; troll_loss=0
         for c in scoring:
             if isinstance(c,WildcardJokerCard):
                 if c.is_troll:
-                    # 50% x3 mult OU perdre 50-900 chips
-                    if random.random()<0.5:
-                        mult=mult*3
-                    else:
-                        troll_loss=random.randint(50,900)
-                        chips=max(0,chips-troll_loss)
-                else:
-                    # Wildcard normal : x6.7 chips ET mult
-                    chips=int(chips*6.7)
-                    mult=mult*6.7
-            else:
-                chips+=c.chip_val
+                    if random.random()<0.5: mult=mult*3
+                    else: troll_loss=random.randint(50,900); chips=max(0,chips-troll_loss)
+                else: chips=int(chips*6.7); mult=mult*6.7
+            else: chips+=c.chip_val
         if game_ref: game_ref._troll_loss=troll_loss
-        for j in jokers:
-            chips,mult=j.apply(chips,mult,hr,scoring)
+        for j in jokers: chips,mult=j.apply(chips,mult,hr,scoring)
         return int(chips*mult), mult
 
 
@@ -564,81 +492,125 @@ class LeSage(Joker):
     def __init__(self): super().__init__("Le Sage","+1 Mult/carte",8,"Rare")
     def apply(self,c,m,h,s): return c,m+len(s)
 
-JOKER_POOL=[JokerClassique,LeGlouton,LeParrain,LeMatheux,LeTricheur,
-            LaChance,LeCollectionneur,LeDoubleur,LeMaudit,LeSage]
-
 
 # ──────────────────────────────────────────────
-#  LA ROULETTE (item du shop, rarete Mystique)
+#  ITEMS SPECIAUX DU SHOP
+#  Tous dans le meme pool, actualises ensemble
 # ──────────────────────────────────────────────
-class LaRouletteShopItem:
-    """
-    Item du shop de rarete Mystique (plus rare que Legendaire).
-    Prix plus eleve. Quand achete : injecte une WildcardJokerCard dans le deck.
-    Raretes du shop : Commun/Rare/Legendaire = jokers normaux, Mystique = La Roulette uniquement.
-    """
-    SHOP_CHANCE = 0.12   # 12% par visite boutique, et seulement si pas deja dans le deck
 
-    def __init__(self):
-        self.name  = "La Roulette"
-        self.price = 15
-        self.rarity= "Mystique"
-
-
-# ──────────────────────────────────────────────
-#  BOB LE TAVERNIER (item shop Legendaire)
-#  - +1 slot joker (5->6), pas vendable
-#  - 3 rafraichissements gratuits par visite boutique
-# ──────────────────────────────────────────────
-class BobTavernierShopItem:
-    SHOP_CHANCE = 0.18
-
-    def __init__(self):
-        self.name  = "BOB le tavernier"
-        self.price = 12
-        self.rarity= "Legendaire"
+class ShopItem:
+    """Base pour les items speciaux du shop (non-jokers)."""
+    def __init__(self,name,desc,price,rarity,icon="[?]"):
+        self.name=name; self.desc=desc; self.price=price
+        self.rarity=rarity; self.icon=icon
 
     @property
-    def color(self): return COL["gold"]
+    def color(self):
+        return {"Commun":COL["dim"],"Rare":COL["blue"],
+                "Legendaire":COL["gold"],"Mystique":COL["mystique"]}.get(self.rarity,COL["dim"])
+
+    def on_buy(self, player, deck):
+        """Appele quand le joueur achete cet item. Retourne un message."""
+        return "Achete !"
 
 
-# ──────────────────────────────────────────────
-#  POISSON DEGUEULASSE (carte dans le deck de base)
-#  - 1 exemplaire toujours present dans le deck
-#  - Des qu'elle apparait en main -> auto-selectionnee, forcee
-#  - 85% : x4 chips ET mult
-#  - 15% : perd toutes les defausses restantes
-# ──────────────────────────────────────────────
-class PoissonDegueulasse(Card):
-    CURSE_CHANCE = 0.15
-
+class MainPlusItem(ShopItem):
+    """Main+ : +1 main par round (permanent)."""
     def __init__(self):
-        super().__init__(Rank.TWO, Suit.CLUB)
-        self.is_poisson = True
-        self.is_joker_wildcard = False
+        super().__init__("Main +","+1 main par round",5,"Rare","[+M]")
 
-    def draw(self, surf, x, y, small=False):
-        cw=CARD_W if not small else 52; ch=CARD_H if not small else 78
-        ay=int(self._anim_y)
-        draw_rect_rounded(surf,(0,0,0),(x+3,y+ay+3,cw,ch),8,120)
-        bg=(180,210,160) if not self.selected else (220,255,180)
-        draw_rect_rounded(surf,bg,(x,y+ay,cw,ch),8)
-        brd=COL["gold"] if self.selected else (80,140,60)
-        draw_border(surf,brd,(x,y+ay,cw,ch),3 if self.selected else 2,8)
-        fx=x+cw//2; fy=y+ay+ch//2-4
-        pygame.draw.ellipse(surf,(60,120,80),(fx-18,fy-9,36,18))
-        pts_q=[(fx+18,fy),(fx+28,fy-10),(fx+28,fy+10)]
-        pygame.draw.polygon(surf,(60,120,80),pts_q)
-        pygame.draw.circle(surf,(255,255,255),(fx-6,fy-2),4)
-        pygame.draw.circle(surf,(0,0,0),(fx-5,fy-2),2)
-        pygame.draw.circle(surf,(100,160,80),(fx-18,fy-14),3)
-        pygame.draw.circle(surf,(100,160,80),(fx-12,fy-18),2)
-        draw_text(surf,"FORCE",F["xs"],(60,140,60),x+cw//2,y+ay+ch-14,center=True)
-        if self._hover and not self.selected:
-            draw_border(surf,(150,220,100),(x-1,y+ay-1,cw+2,ch+2),1,9)
+    def on_buy(self, player, deck):
+        player.bonus_hands+=1
+        return "+1 main gagnee ! Vos prochains rounds auront une main de plus."
 
-    def get_rect(self,x,y):
-        return pygame.Rect(x,y+int(self._anim_y),CARD_W,CARD_H)
+
+class PoubellItem(ShopItem):
+    """Poubelle : +1 defausse par round (permanent)."""
+    def __init__(self):
+        super().__init__("Poubelle","+1 defausse par round",4,"Rare","[+D]")
+
+    def on_buy(self, player, deck):
+        player.bonus_discards+=1
+        return "+1 defausse gagnee ! Vos prochains rounds auront une defausse de plus."
+
+
+class LaRouletteItem(ShopItem):
+    """La Roulette : injecte une WILDCARD dans le deck."""
+    def __init__(self):
+        super().__init__("La Roulette",
+                         "Ajoute 1 WILDCARD\ndans votre deck.\nCombo universel\nx6.7 chips+mult\n3% -> TROLL !",
+                         15,"Mystique","[~]")
+
+    def on_buy(self, player, deck):
+        deck.add_wildcard()
+        return "WILDCARD ajoutee au deck ! Attention aux mutations..."
+
+
+class BobTavernierItem(ShopItem):
+    """BOB le tavernier : +1 slot joker + 3 refreshs gratuits/visite."""
+    def __init__(self):
+        super().__init__("BOB le tavernier",
+                         "+1 slot joker\n(5->6)\n3 refreshs\ngratuits/visite",
+                         12,"Legendaire","[B]")
+
+    def on_buy(self, player, deck):
+        player.has_bob=True
+        player.max_jokers=6
+        player.free_refreshes=3
+        return "BOB est avec vous ! +1 slot joker + 3 refreshs/visite !"
+
+
+# ──────────────────────────────────────────────
+#  POOL UNIFIE DU SHOP
+#  Jokers + items speciaux, tout melange
+#  Poids de tirage selon conditions
+# ──────────────────────────────────────────────
+
+JOKER_CLASSES = [JokerClassique,LeGlouton,LeParrain,LeMatheux,LeTricheur,
+                 LaChance,LeCollectionneur,LeDoubleur,LeMaudit,LeSage]
+
+
+def build_shop_pool(player, deck):
+    """
+    Construit la liste d'items disponibles pour ce tirage.
+    Retourne une liste de (poids, constructeur) selon les conditions.
+    """
+    pool = []
+    # Jokers normaux : poids 10 chacun
+    for jc in JOKER_CLASSES:
+        pool.append((10, jc))
+    # Main+ et Poubelle : Rare, peuvent reapparaitre, poids 6
+    pool.append((6, MainPlusItem))
+    pool.append((6, PoubellItem))
+    # BOB : Legendaire, uniquement si pas encore possede, poids 3
+    if not player.has_bob:
+        pool.append((3, BobTavernierItem))
+    # La Roulette : Mystique, uniquement si pas deja dans le deck, poids 2
+    if not deck.has_wildcard():
+        pool.append((2, LaRouletteItem))
+    return pool
+
+
+def draw_shop_items(pool, n, player, deck):
+    """Tire n items distincts dans le pool (sans remise pour eviter doublons de meme instance)."""
+    weights=[w for w,_ in pool]
+    classes=[c for _,c in pool]
+    chosen=[]
+    used_classes=set()
+    attempts=0
+    while len(chosen)<n and attempts<200:
+        attempts+=1
+        total=sum(w for w,c in pool if c not in used_classes)
+        if total==0: break
+        r=random.uniform(0,total); acc=0
+        for w,c in pool:
+            if c in used_classes: continue
+            acc+=w
+            if r<=acc:
+                chosen.append(c())
+                used_classes.add(c)
+                break
+    return chosen
 
 
 # ──────────────────────────────────────────────
@@ -650,18 +622,18 @@ class Blind:
         self.reward=reward; self.boss_type=boss_type
 
 BLINDS=[
-    [Blind("Petite Aveugle","Echauffez-vous !",   300, 3),
-     Blind("Grande Aveugle","Ca commence !",       500, 4),
-     Blind("Boss: Limace",  "Jokers desactives", 1000, 6,"limace")],
-    [Blind("Petite Aveugle","Allez-y !",          1100, 4),
-     Blind("Grande Aveugle","Concentrez-vous !",  1300, 6),
-     Blind("Boss: Mur",     "4 mains seulement", 2000, 8,"mur")],
-    [Blind("Petite Aveugle","La vraie partie",    2100, 5),
-     Blind("Grande Aveugle","Pas de pitie",       2300, 8),
-     Blind("Boss: Crane",   "Score x0.5",        3000,12,"crane")],
-    [Blind("Petite Aveugle","Courage !",          3100, 7),
-     Blind("Grande Aveugle","Presque la...",      4000,10),
-     Blind("BOSS FINAL: ROI","Score x0.25",      5000,20,"roi")],
+    [Blind("la Fourmie","Echauffez-vous !",    300, 3),
+     Blind("Le Scarabe","Ca commence !",        500, 4),
+     Blind("Boss: Limace","Jokers desactives", 1000, 6,"limace")],
+    [Blind("le Ciment","Allez-y !",            1100, 4),
+     Blind("La Brique","Concentrez-vous !",    1300, 6),
+     Blind("Boss: Mur","4 mains seulement",    2000, 8,"mur")],
+    [Blind("le Crane","La vraie partie",       2100, 5),
+     Blind("Le Squelette","Pas de pitie",      2300, 8),
+     Blind("Boss: La Sorciere","Score x0.5",  3000,12,"sorciere")],
+    [Blind("Le Soldat","Courage !",            3100, 7),
+     Blind("Garde Royal","Presque la...",      4000,10),
+     Blind("BOSS FINAL: ROI","Score x0.25",   5000,20,"roi")],
 ]
 
 # ──────────────────────────────────────────────
@@ -672,8 +644,9 @@ class Player:
         self.money=10; self.jokers: list[Joker]=[]
         self.max_jokers=5; self.hands_left=4
         self.discards_left=3; self.hands_played=0
-        self.has_bob=False          # possede BOB le tavernier
-        self.free_refreshes=0       # refreshs gratuits offerts par BOB
+        self.has_bob=False; self.free_refreshes=0
+        self.bonus_hands=0      # bonus permanent de mains (Main+)
+        self.bonus_discards=0   # bonus permanent de defausses (Poubelle)
 
     def add_joker(self,j):
         if len(self.jokers)<self.max_jokers: self.jokers.append(j); return True
@@ -725,16 +698,13 @@ class DiscardParticle:
         temp=pygame.Surface((CARD_W,CARD_H),pygame.SRCALPHA)
         pygame.draw.rect(temp,(*COL["card_w"],alpha),(0,0,CARD_W,CARD_H),border_radius=8)
         pygame.draw.rect(temp,(*COL["card_brd"],alpha),(0,0,CARD_W,CARD_H),2,border_radius=8)
-        if not isinstance(self.card,WildcardJokerCard):
+        if not isinstance(self.card,(WildcardJokerCard,PoissonDegueulasse)):
             sc=self.card.suit.color; f=F["rank"]
             sr=f.render(self.card.rank.display,True,(*sc,alpha))
             ss=F["suit"].render(SUIT_SYMBOLS[self.card.suit.symbol],True,(*sc,alpha))
             temp.blit(sr,(5,5)); temp.blit(ss,(5,5+f.get_height()-2))
         surf.blit(temp,(int(self.x),int(self.y)))
 
-# ──────────────────────────────────────────────
-#  BOUTON
-# ──────────────────────────────────────────────
 class Button:
     def __init__(self,x,y,w,h,text,color=None,text_color=None):
         self.rect=pygame.Rect(x,y,w,h); self.text=text
@@ -757,80 +727,88 @@ class Button:
         return (event.type==pygame.MOUSEBUTTONDOWN and event.button==1
                 and self.rect.collidepoint(event.pos) and not self.disabled)
 
+
 # ──────────────────────────────────────────────
-#  BOUTIQUE
+#  BOUTIQUE — pool unifie, layout centre
 # ──────────────────────────────────────────────
+SHOP_SLOTS   = 4      # nombre d'items affiches simultanement
+CARD_SLOT_W  = 190    # largeur d'un slot
+CARD_SLOT_H  = 240    # hauteur d'un slot
+CARD_SLOT_Y  = 175    # y de depart des cartes
+CARD_SLOT_GAP= 14     # espace entre les cartes
+
 class ShopScreen:
     def __init__(self,player,deck,on_close):
         self.player=player; self.deck=deck; self.on_close=on_close
-        self.jokers=[random.choice(JOKER_POOL)() for _ in range(3)]
-        self.la_roulette: Optional[LaRouletteShopItem]=None
-        self.bob: Optional[BobTavernierShopItem]=None
-        self._maybe_add_specials()
+        self.items=[]   # liste d'items affiches (Joker ou ShopItem)
+        self._refresh_items()
         self.msg=""; self.msg_timer=0
-        # BOB donne 3 refreshs gratuits a chaque visite
         if self.player.has_bob:
             self.player.free_refreshes=3
-        self.btn_close  =Button(W//2-80, H-70,160,44,"Continuer ->",  COL["btn_play"])
-        # Texte du bouton refresh selon refreshs gratuits dispo
-        self._update_refresh_btn()
-        self.btn_sell: list[Button]=[]
+        # Boutons en bas, bien espaces
+        btn_y=H-68
+        self.btn_close  =Button(W//2+110, btn_y, 170, 44, "Continuer ->", COL["btn_play"])
+        self.btn_sell_all=[]
         self._build_sell_buttons()
+        self._update_refresh_btn()
         self._ranim=0.0
 
     def _update_refresh_btn(self):
+        btn_y=H-68
         if self.player.free_refreshes>0:
-            label=f"Rafraichir GRATUIT ({self.player.free_refreshes})"
+            label=f"Gratuit ({self.player.free_refreshes})"
+            col=COL["btn_play"]
         else:
             label="Rafraichir 2$"
-        self.btn_refresh=Button(W//2-260,H-70,200,44,label,COL["btn_play"] if self.player.free_refreshes>0 else COL["btn"])
+            col=COL["btn"]
+        self.btn_refresh=Button(W//2-80, btn_y, 180, 44, label, col)
 
-    def _maybe_add_specials(self):
-        if not self.deck.has_wildcard() and random.random()<LaRouletteShopItem.SHOP_CHANCE:
-            self.la_roulette=LaRouletteShopItem()
-        if not self.player.has_bob and random.random()<BobTavernierShopItem.SHOP_CHANCE:
-            self.bob=BobTavernierShopItem()
+    def _refresh_items(self):
+        pool=build_shop_pool(self.player,self.deck)
+        self.items=draw_shop_items(pool, SHOP_SLOTS, self.player, self.deck)
 
     def _build_sell_buttons(self):
-        self.btn_sell=[]
+        self.btn_sell_all=[]
         for i,j in enumerate(self.player.jokers):
-            bx=60+i*160
+            bx=self._joker_slot_x(i)
             if j.locked:
-                b=Button(bx,660,150,30,"[VERROUILLE]",COL["dim"]); b.disabled=True
-                self.btn_sell.append(b)
+                b=Button(bx,662,155,28,"[VERROUILLE]",COL["dim"]); b.disabled=True
             else:
-                self.btn_sell.append(Button(bx,660,150,30,f"Vendre {j.price//2}$",COL["btn_disc"]))
+                b=Button(bx,662,155,28,f"Vendre {j.price//2}$",COL["btn_disc"])
+            self.btn_sell_all.append(b)
 
-    def _joker_rect(self,i):
-        # 3 jokers normaux centres a gauche
-        sx=W//2-300-(len(self.jokers)*190)//2
-        return pygame.Rect(sx+i*190,200,170,230)
+    def _item_rect(self,i):
+        """Rect du i-eme item du shop, centres."""
+        n=len(self.items)
+        total_w=n*CARD_SLOT_W+(n-1)*CARD_SLOT_GAP
+        x0=(W-total_w)//2
+        x=x0+i*(CARD_SLOT_W+CARD_SLOT_GAP)
+        return pygame.Rect(x, CARD_SLOT_Y, CARD_SLOT_W, CARD_SLOT_H)
 
-    def _roulette_rect(self):
-        return pygame.Rect(W//2+220,175,185,255)
-
-    def _bob_rect(self):
-        return pygame.Rect(W//2+20,175,185,255)
+    def _joker_slot_x(self,i):
+        return 30+i*165
 
     def handle(self,event):
         mx,my=pygame.mouse.get_pos()
         self.btn_close.update(mx,my); self.btn_refresh.update(mx,my)
-        for b in self.btn_sell: b.update(mx,my)
+        for b in self.btn_sell_all: b.update(mx,my)
 
         if self.btn_close.clicked(event): self.on_close(); return
+
         if self.btn_refresh.clicked(event):
             if self.player.free_refreshes>0:
                 self.player.free_refreshes-=1
-                self.jokers=[random.choice(JOKER_POOL)() for _ in range(3)]
+                self._refresh_items()
                 self._update_refresh_btn()
-                self._show_msg(f"Rafraichi GRATUITEMENT ! (Bob: {self.player.free_refreshes} restants)")
+                self._show_msg(f"Rafraichi gratuitement ! ({self.player.free_refreshes} restants)")
             elif self.player.spend(2):
-                self.jokers=[random.choice(JOKER_POOL)() for _ in range(3)]
+                self._refresh_items()
                 self._show_msg("Boutique rafraichie !")
             else:
                 self._show_msg("Pas assez d'argent !")
+            return
 
-        for i,b in enumerate(self.btn_sell):
+        for i,b in enumerate(self.btn_sell_all):
             if b.clicked(event) and i<len(self.player.jokers):
                 j=self.player.jokers[i]
                 if j.locked: self._show_msg(f"{j.name} est verrouille !"); return
@@ -839,157 +817,185 @@ class ShopScreen:
                 self._build_sell_buttons(); return
 
         if event.type==pygame.MOUSEBUTTONDOWN and event.button==1:
-            for i,j in enumerate(self.jokers):
-                r=self._joker_rect(i)
+            for i,item in enumerate(self.items):
+                r=self._item_rect(i)
                 if r.collidepoint(event.pos):
-                    if self.player.spend(j.price):
-                        if self.player.add_joker(j):
-                            self.jokers.pop(i); self._show_msg(f"{j.name} achete !")
-                            self._build_sell_buttons()
-                        else: self.player.earn(j.price); self._show_msg("Jokers pleins !")
-                    else: self._show_msg("Pas assez d'argent !")
-                    return
+                    self._try_buy(i); return
 
-            if self.la_roulette:
-                rr=self._roulette_rect()
-                if rr.collidepoint(event.pos):
-                    if self.player.spend(self.la_roulette.price):
-                        self.deck.add_wildcard(); self.la_roulette=None
-                        self._show_msg("WILDCARD ajoutee au deck !")
-                    else: self._show_msg("Pas assez d'argent !")
-                    return
+    def _try_buy(self,i):
+        item=self.items[i]
+        price=item.price if hasattr(item,'price') else 0
 
-            if self.bob:
-                br=self._bob_rect()
-                if br.collidepoint(event.pos):
-                    if self.player.spend(self.bob.price):
-                        self.player.has_bob=True
-                        self.player.max_jokers=6
-                        self.player.free_refreshes=3
-                        self.bob=None
-                        self._update_refresh_btn()
-                        self._show_msg("BOB est avec vous ! +1 slot joker + 3 refreshs/visite !")
-                    else: self._show_msg("Pas assez d'argent !")
-                    return
+        if not self.player.spend(price):
+            self._show_msg("Pas assez d'argent !"); return
 
-    def _show_msg(self,m): self.msg=m; self.msg_timer=160
+        # Item special (ShopItem)
+        if isinstance(item, ShopItem):
+            msg=item.on_buy(self.player, self.deck)
+            self.items.pop(i)
+            self._update_refresh_btn()
+            self._build_sell_buttons()
+            self._show_msg(msg)
+        # Joker normal
+        else:
+            if self.player.add_joker(item):
+                self.items.pop(i)
+                self._build_sell_buttons()
+                self._show_msg(f"{item.name} achete !")
+            else:
+                self.player.earn(price)
+                self._show_msg("Jokers pleins ! Vendez-en un.")
+
+    def _show_msg(self,m): self.msg=m; self.msg_timer=180
 
     def update(self): self._ranim+=0.05
 
+    def _draw_item_card(self, surf, item, r, hv):
+        """Dessine un slot d'item du shop (joker ou item special)."""
+        is_roulette=isinstance(item, LaRouletteItem)
+        is_bob=isinstance(item, BobTavernierItem)
+        is_main=isinstance(item, MainPlusItem)
+        is_poubelle=isinstance(item, PoubellItem)
+        is_special=isinstance(item, ShopItem)
+
+        # Fond
+        if is_roulette:
+            pulse=0.5+0.5*abs(math.sin(self._ranim))
+            bg=lerp_color((20,10,40),COL["mystique"],pulse*0.4)
+        elif is_bob:
+            pulse=0.5+0.5*abs(math.sin(self._ranim*0.8))
+            bg=lerp_color((40,30,10),COL["gold"],pulse*0.3)
+        else:
+            bg=lerp_color(COL["panel"],COL["btn_h"],0.3 if hv else 0)
+        draw_rect_rounded(surf,bg,r,12)
+
+        # Bordure
+        col=item.color if is_special else item.color
+        brd_w=3 if hv else 2
+        if is_roulette:
+            pulse=0.5+0.5*abs(math.sin(self._ranim))
+            col=lerp_color(COL["mystique"],(220,180,255),0.4*abs(math.sin(self._ranim*1.8)))
+        elif is_bob:
+            pulse=0.5+0.5*abs(math.sin(self._ranim*0.8))
+            col=lerp_color(COL["gold"],(255,240,150),0.4*abs(math.sin(self._ranim)))
+        draw_border(surf,col,r,brd_w,12)
+
+        # Rarete
+        rar_col=item.color if is_special else item.color
+        draw_text(surf,f"* {item.rarity} *",F["xs"],rar_col,r.centerx,r.top+14,center=True)
+
+        # Icone / dessin
+        iy=r.top+52
+        if is_bob:
+            # Dessin Bob
+            bcx=r.centerx; bcy=r.top+56
+            pygame.draw.circle(surf,(220,180,120),(bcx,bcy),14)
+            pygame.draw.rect(surf,(120,60,20),(bcx-10,bcy+14,20,22))
+            pygame.draw.line(surf,(120,60,20),(bcx-10,bcy+18),(bcx-20,bcy+30),3)
+            pygame.draw.line(surf,(120,60,20),(bcx+10,bcy+18),(bcx+20,bcy+30),3)
+            pygame.draw.circle(surf,(0,0,0),(bcx-4,bcy-2),2)
+            pygame.draw.circle(surf,(0,0,0),(bcx+4,bcy-2),2)
+            pygame.draw.arc(surf,(0,0,0),pygame.Rect(bcx-5,bcy+5,10,6),math.pi,0,2)
+            pygame.draw.rect(surf,(200,160,40),(bcx+18,bcy+22,8,10))
+            pygame.draw.rect(surf,(220,220,100),(bcx+18,bcy+22,8,4))
+            iy=r.top+88
+        elif is_roulette:
+            spin=["[~]","[*]","[?]","[@]"]
+            icon=spin[int(self._ranim*3)%len(spin)] if hv else "[~]"
+            draw_text(surf,icon,load_font(24,True),COL["mystique"],r.centerx,r.top+52,center=True)
+            iy=r.top+78
+        elif is_main:
+            draw_text(surf,"+M",load_font(36,True),COL["blue"],r.centerx,r.top+52,center=True)
+            iy=r.top+82
+        elif is_poubelle:
+            draw_text(surf,"+D",load_font(36,True),COL["green"],r.centerx,r.top+52,center=True)
+            iy=r.top+82
+        else:
+            draw_text(surf,"[J]",load_font(30),COL["white"],r.centerx,r.top+50,center=True)
+            iy=r.top+80
+
+        # Nom
+        draw_text(surf,item.name,F["joker"],COL["white"],r.centerx,iy,center=True)
+
+        # Description (wrap)
+        desc_raw=item.desc if hasattr(item,'desc') else ""
+        lines=desc_raw.split("\n") if "\n" in desc_raw else []
+        if not lines:
+            words=desc_raw.split(); line=[]; lines2=[]
+            for w in words:
+                if F["xs"].size(" ".join(line+[w]))[0]<r.width-16: line.append(w)
+                else: lines2.append(" ".join(line)); line=[w]
+            lines2.append(" ".join(line)); lines=lines2
+        for li,l in enumerate(lines):
+            lc=COL["red"] if "TROLL" in l else COL["dim"]
+            draw_text(surf,l,F["xs"],lc,r.centerx,iy+18+li*16,center=True)
+
+        # Prix
+        pc=COL["green"] if self.player.money>=item.price else COL["red"]
+        draw_text(surf,f"Prix: {item.price}$",F["med"],pc,r.centerx,r.bottom-34,center=True)
+        if hv:
+            draw_text(surf,"Cliquer pour acheter",F["xs"],COL["gold"],r.centerx,r.bottom-16,center=True)
+
+        # Glow hover pour items speciaux
+        if hv and is_special:
+            glow=pygame.Surface((r.w+16,r.h+16),pygame.SRCALPHA)
+            gc=item.color
+            pygame.draw.rect(glow,(*gc,30),(0,0,r.w+16,r.h+16),border_radius=16)
+            surf.blit(glow,(r.x-8,r.y-8))
+
     def draw(self,surf):
         draw_rect_rounded(surf,COL["shop_bg"],(0,0,W,H),0)
-        draw_text(surf,"* BOUTIQUE *",F["title"],COL["gold"],W//2,50,center=True)
-        draw_text(surf,f"Argent: {self.player.money}$",F["big"],COL["green"],W//2,100,center=True)
+        draw_text(surf,"* BOUTIQUE *",F["title"],COL["gold"],W//2,40,center=True)
+        draw_text(surf,f"Argent: {self.player.money}$",F["big"],COL["green"],W//2,92,center=True)
 
-        # Statut BOB et wildcard
-        info_y=148
+        # Infos statut
+        info_y=138
         if self.player.has_bob:
-            draw_text(surf,f"[BOB] +1 slot joker | {self.player.free_refreshes} refresh(s) gratuit(s)",
-                      F["xs"],COL["gold"],W//2,info_y,center=True)
-            info_y+=18
+            draw_text(surf,f"[BOB] slots joker: {self.player.max_jokers} | {self.player.free_refreshes} refresh(s) gratuit(s)",
+                      F["xs"],COL["gold"],W//2,info_y,center=True); info_y+=17
         if self.deck.has_wildcard():
             wt=self.deck._wildcard
             wc_col=COL["troll"] if wt and wt.is_troll else COL["mystique"]
-            wc_txt="[TROLL] WILDCARD dans deck !" if (wt and wt.is_troll) else "[WILD] dans deck"
-            draw_text(surf,wc_txt,F["xs"],wc_col,W//2,info_y,center=True)
+            wc_txt="[TROLL] dans deck !" if (wt and wt.is_troll) else "[WILD] dans deck"
+            draw_text(surf,wc_txt,F["xs"],wc_col,W//2,info_y,center=True); info_y+=17
+        bonuses=[]
+        if self.player.bonus_hands>0: bonuses.append(f"+{self.player.bonus_hands} mains/round")
+        if self.player.bonus_discards>0: bonuses.append(f"+{self.player.bonus_discards} defausses/round")
+        if bonuses:
+            draw_text(surf," | ".join(bonuses),F["xs"],COL["green"],W//2,info_y,center=True)
 
-        # Jokers normaux (a gauche)
-        for i,j in enumerate(self.jokers):
-            r=self._joker_rect(i); mx,my=pygame.mouse.get_pos(); hv=r.collidepoint(mx,my)
-            draw_rect_rounded(surf,lerp_color(COL["panel"],COL["btn_h"],0.3 if hv else 0),r,12)
-            draw_border(surf,j.color,r,2,12)
-            draw_text(surf,"[J]",load_font(28),COL["white"],r.centerx,r.top+40,center=True)
-            draw_text(surf,j.name,F["joker"],COL["white"],r.centerx,r.top+80,center=True)
-            draw_text(surf,j.rarity,F["xs"],j.color,r.centerx,r.top+100,center=True)
-            words=j.desc.split(); line=[]; lines=[]
-            for w in words:
-                if F["xs"].size(" ".join(line+[w]))[0]<r.width-16: line.append(w)
-                else: lines.append(" ".join(line)); line=[w]
-            lines.append(" ".join(line))
-            for li,l in enumerate(lines):
-                draw_text(surf,l,F["xs"],COL["dim"],r.centerx,r.top+120+li*17,center=True)
-            pc=COL["green"] if self.player.money>=j.price else COL["red"]
-            draw_text(surf,f"Prix: {j.price}$",F["med"],pc,r.centerx,r.bottom-36,center=True)
-            if hv: draw_text(surf,"Cliquer pour acheter",F["xs"],COL["gold"],r.centerx,r.bottom-16,center=True)
+        # Items du shop (centres)
+        mx,my=pygame.mouse.get_pos()
+        for i,item in enumerate(self.items):
+            r=self._item_rect(i); hv=r.collidepoint(mx,my)
+            self._draw_item_card(surf,item,r,hv)
 
-        # BOB le tavernier (Legendaire, a droite-centre)
-        if self.bob:
-            br=self._bob_rect(); mx,my=pygame.mouse.get_pos(); hv=br.collidepoint(mx,my)
-            pulse=0.5+0.5*abs(math.sin(self._ranim*0.8))
-            bg_col=lerp_color((40,30,10),COL["gold"],pulse*0.3)
-            draw_rect_rounded(surf,bg_col,br,12)
-            brd_col=lerp_color(COL["gold"],(255,240,150),0.4*abs(math.sin(self._ranim)))
-            draw_border(surf,brd_col,br,3 if hv else 2,12)
-            draw_text(surf,"* LEGENDAIRE *",F["xs"],COL["gold"],br.centerx,br.top+14,center=True)
-            # Dessin Bob (bonhomme de taverne)
-            bcx=br.centerx; bcy=br.top+58
-            pygame.draw.circle(surf,(220,180,120),(bcx,bcy),16)   # tete
-            pygame.draw.rect(surf,(120,60,20),(bcx-12,bcy+16,24,28))  # corps
-            pygame.draw.line(surf,(120,60,20),(bcx-12,bcy+20),(bcx-22,bcy+36),3)
-            pygame.draw.line(surf,(120,60,20),(bcx+12,bcy+20),(bcx+22,bcy+36),3)
-            pygame.draw.circle(surf,(0,0,0),(bcx-5,bcy-2),3)
-            pygame.draw.circle(surf,(0,0,0),(bcx+5,bcy-2),3)
-            pts_smile=[(bcx-6,bcy+8),(bcx,bcy+12),(bcx+6,bcy+8)]
-            pygame.draw.lines(surf,(0,0,0),False,pts_smile,2)
-            # chope de biere
-            pygame.draw.rect(surf,(200,160,40),(bcx+22,bcy+28,10,14))
-            pygame.draw.rect(surf,(220,220,100),(bcx+22,bcy+28,10,5))
-
-            draw_text(surf,"BOB le tavernier",F["joker"],COL["gold"],br.centerx,br.top+96,center=True)
-            bob_desc=["slot joker 5 -> 6","3 refreshs gratuits","/visite boutique","Ne peut pas vendre"]
-            for li,l in enumerate(bob_desc):
-                draw_text(surf,l,F["xs"],COL["dim"],br.centerx,br.top+116+li*17,center=True)
-            pc=COL["green"] if self.player.money>=self.bob.price else COL["red"]
-            draw_text(surf,f"Prix: {self.bob.price}$",F["med"],pc,br.centerx,br.bottom-34,center=True)
-            if hv: draw_text(surf,"Engager Bob !",F["xs"],COL["gold"],br.centerx,br.bottom-16,center=True)
-            if hv:
-                glow=pygame.Surface((br.w+16,br.h+16),pygame.SRCALPHA)
-                pygame.draw.rect(glow,(*COL["gold"],int(30*pulse)),(0,0,br.w+16,br.h+16),border_radius=16)
-                surf.blit(glow,(br.x-8,br.y-8))
-
-        # La Roulette (Mystique, a droite)
-        if self.la_roulette:
-            rr=self._roulette_rect(); mx,my=pygame.mouse.get_pos(); hv=rr.collidepoint(mx,my)
-            pulse=0.5+0.5*abs(math.sin(self._ranim))
-            bg_col=lerp_color((20,10,40),COL["mystique"],pulse*0.4)
-            draw_rect_rounded(surf,bg_col,rr,14)
-            brd_col=lerp_color(COL["mystique"],(220,180,255),0.4*abs(math.sin(self._ranim*1.8)))
-            draw_border(surf,brd_col,rr,3 if hv else 2,14)
-            draw_text(surf,"* MYSTIQUE *",F["xs"],COL["mystique"],rr.centerx,rr.top+14,center=True)
-            spin=["[ROULETTE]","[WILD]","[?]","[*]"]
-            icon=spin[int(self._ranim*3)%len(spin)] if hv else "[ROULETTE]"
-            draw_text(surf,icon,load_font(20,True),COL["mystique"],rr.centerx,rr.top+48,center=True)
-            draw_text(surf,"La Roulette",F["med"],COL["mystique"],rr.centerx,rr.top+78,center=True)
-            desc=["Ajoute 1 WILDCARD","dans votre deck.","Combo universel","x6.7 chips ET mult","! 3% -> TROLL !"]
-            for li,l in enumerate(desc):
-                col=COL["red"] if "TROLL" in l else COL["dim"]
-                draw_text(surf,l,F["xs"],col,rr.centerx,rr.top+100+li*17,center=True)
-            pc=COL["green"] if self.player.money>=self.la_roulette.price else COL["red"]
-            draw_text(surf,f"Prix: {self.la_roulette.price}$",F["med"],pc,rr.centerx,rr.bottom-34,center=True)
-            if hv: draw_text(surf,"Tenter la chance !",F["xs"],COL["gold"],rr.centerx,rr.bottom-16,center=True)
-            if hv:
-                glow=pygame.Surface((rr.w+20,rr.h+20),pygame.SRCALPHA)
-                pygame.draw.rect(glow,(*COL["mystique"],int(40*pulse)),(0,0,rr.w+20,rr.h+20),border_radius=18)
-                surf.blit(glow,(rr.x-10,rr.y-10))
+        # Separateur
+        pygame.draw.line(surf,COL["dim"],(30,430),(W-30,430),1)
 
         # Jokers du joueur
         draw_text(surf,f"Vos jokers ({len(self.player.jokers)}/{self.player.max_jokers})",
-                  F["med"],COL["purple"],W//2,460,center=True)
+                  F["med"],COL["purple"],W//2,442,center=True)
+
         for i,j in enumerate(self.player.jokers):
-            bx=40+i*160; bw,bh=150,100; by=490
+            bx=self._joker_slot_x(i); bw,bh=155,110; by=462
             draw_rect_rounded(surf,COL["panel"],(bx,by,bw,bh),8)
             draw_border(surf,j.color,(bx,by,bw,bh),2 if j.locked else 1,8)
-            draw_text(surf,j.name,F["joker"],COL["white"],bx+bw//2,by+16,center=True)
-            draw_text(surf,j.rarity,F["xs"],j.color,bx+bw//2,by+36,center=True)
-            draw_text(surf,j.desc[:22],F["xs"],COL["dim"],bx+bw//2,by+56,center=True)
-            if i<len(self.btn_sell): self.btn_sell[i].draw(surf)
+            draw_text(surf,j.name,F["joker"],COL["white"],bx+bw//2,by+14,center=True)
+            draw_text(surf,j.rarity,F["xs"],j.color,bx+bw//2,by+32,center=True)
+            draw_text(surf,j.desc[:20],F["xs"],COL["dim"],bx+bw//2,by+50,center=True)
+            draw_text(surf,j.desc[20:42],F["xs"],COL["dim"],bx+bw//2,by+66,center=True)
+            if i<len(self.btn_sell_all): self.btn_sell_all[i].draw(surf)
 
-        self.btn_close.draw(surf); self.btn_refresh.draw(surf)
+        # Boutons du bas bien espaces
+        self.btn_refresh.draw(surf)
+        self.btn_close.draw(surf)
 
         if self.msg_timer>0:
             self.msg_timer-=1; alpha=min(255,self.msg_timer*3)
             s=F["med"].render(self.msg,True,COL["gold"]); s.set_alpha(alpha)
-            surf.blit(s,s.get_rect(center=(W//2,H//2)))
+            surf.blit(s,s.get_rect(center=(W//2,H//2-20)))
+
 
 # ──────────────────────────────────────────────
 #  JEU
@@ -1018,8 +1024,9 @@ class GameScreen:
         self.hand=self.deck.draw(self.HAND_SIZE)
         self.score=0; self.anim_score=0
         blind=self._current_blind()
-        self.player.hands_left  =3 if blind.boss_type=="mur" else 4
-        self.player.discards_left=3
+        base_hands=3 if blind.boss_type=="mur" else 4
+        self.player.hands_left   = base_hands + self.player.bonus_hands
+        self.player.discards_left= 3 + self.player.bonus_discards
         self._enforce_poisson()
         for c in self.hand:
             if isinstance(c,WildcardJokerCard) and c.is_troll:
@@ -1027,7 +1034,6 @@ class GameScreen:
                 break
 
     def _enforce_poisson(self):
-        """Si le Poisson Degueulasse est en main, il est auto-selectionne et force."""
         for c in self.hand:
             if isinstance(c,PoissonDegueulasse):
                 c.selected=True
@@ -1040,7 +1046,6 @@ class GameScreen:
     def _selected(self): return [c for c in self.hand if c.selected]
 
     def _toggle(self,card):
-        # Le Poisson Degueulasse ne peut pas etre deselectionne
         if isinstance(card,PoissonDegueulasse): return
         sel=self._selected()
         if card.selected: card.selected=False
@@ -1060,22 +1065,16 @@ class GameScreen:
         pts,mult=HandEvaluator.score(hr,scoring,jokers,game_ref=self)
         pts=int(pts*penalty)
 
-        # Effet Poisson Degueulasse
         poisson_in_sel=[c for c in sel if isinstance(c,PoissonDegueulasse)]
         poisson_curse=False
         if poisson_in_sel:
             if random.random()<PoissonDegueulasse.CURSE_CHANCE:
-                # 15% : perd toutes les defausses
-                self.player.discards_left=0
-                poisson_curse=True
+                self.player.discards_left=0; poisson_curse=True
                 self._show_msg("~~ POISSON MAUDIT ! Toutes vos defausses sont perdues ! ~~")
             else:
-                # 85% : x4 chips ET mult
-                pts=int(pts*4)
-                mult=mult*4
+                pts=int(pts*4); mult=mult*4
 
-        self.score+=pts
-        self.player.hands_left-=1; self.player.hands_played+=1
+        self.score+=pts; self.player.hands_left-=1; self.player.hands_played+=1
 
         cx=W//2; cy=H-180
         for _ in range(20):
@@ -1087,13 +1086,11 @@ class GameScreen:
 
         if has_wild_normal:
             for _ in range(10):
-                self.particles.append(Particle(
-                    cx+random.randint(-100,100),cy+random.randint(-30,30),
+                self.particles.append(Particle(cx+random.randint(-100,100),cy+random.randint(-30,30),
                     COL["mystique"],random.choice(["x6.7","WILD","*","!"])))
         if has_troll:
             for _ in range(14):
-                self.particles.append(Particle(
-                    cx+random.randint(-140,140),cy+random.randint(-50,50),
+                self.particles.append(Particle(cx+random.randint(-140,140),cy+random.randint(-50,50),
                     COL["troll"],random.choice(["XD","lol","HEHE","TROL","gg"])))
             if self._troll_loss>0:
                 self.particles.append(Particle(cx+40,cy-40,COL["red"],f"-{self._troll_loss}"))
@@ -1101,8 +1098,7 @@ class GameScreen:
             pcolor=COL["red"] if poisson_curse else COL["green"]
             plabel="MAUDIT!" if poisson_curse else "x4 POISSON!"
             for _ in range(12):
-                self.particles.append(Particle(
-                    cx+random.randint(-110,110),cy+random.randint(-40,40),
+                self.particles.append(Particle(cx+random.randint(-110,110),cy+random.randint(-40,40),
                     pcolor,random.choice([plabel,"~","*~*","glou"])))
 
         self.hand=[c for c in self.hand if not c.selected]
@@ -1112,13 +1108,13 @@ class GameScreen:
                 self._show_msg("!!! La WILDCARD vient de MUTER en TROLL !!!")
         self.hand.extend(new_cards)
         for c in self.hand: c.selected=False
-        self._enforce_poisson()   # re-forcer si le poisson revient en main
+        self._enforce_poisson()
 
         self.result_msg=hr.name_fr; self.result_pts=pts
-        wild_note=" | WILD x6.7 !" if has_wild_normal else ""
-        troll_note=f" | TROLL -{self._troll_loss}pts" if self._troll_loss>0 else (" | TROLL x3!" if has_troll else "")
-        poisson_note=" | POISSON x4 !" if (poisson_in_sel and not poisson_curse) else (" | POISSON MAUDIT !" if poisson_curse else "")
-        self.result_hand=f"Chips: {hr.base_chips}  xMult: {mult:.1f}{wild_note}{troll_note}{poisson_note}"
+        wild_note=" | WILD x6.7!" if has_wild_normal else ""
+        troll_note=f" | TROLL -{self._troll_loss}" if self._troll_loss>0 else (" | TROLL x3!" if has_troll else "")
+        poisson_note=" | POISSON x4!" if (poisson_in_sel and not poisson_curse) else (" | POISSON MAUDIT!" if poisson_curse else "")
+        self.result_hand=f"Chips:{hr.base_chips}  xMult:{mult:.1f}{wild_note}{troll_note}{poisson_note}"
         self.result_timer=120; self.state="result"
 
     def _discard(self):
@@ -1126,10 +1122,7 @@ class GameScreen:
         if not sel: self._show_msg("Selectionnez des cartes !"); return
         if self.player.discards_left<=0: self._show_msg("Plus de defausses !"); return
 
-        # Wildcards et Poisson ne peuvent pas etre defaussees
-        wilds=[c for c in sel if isinstance(c,WildcardJokerCard)]
-        poissons=[c for c in sel if isinstance(c,PoissonDegueulasse)]
-        blocked=wilds+poissons
+        blocked=[c for c in sel if isinstance(c,(WildcardJokerCard,PoissonDegueulasse))]
         if blocked:
             for bc in blocked: bc.selected=False
             sel=[c for c in sel if not isinstance(c,(WildcardJokerCard,PoissonDegueulasse))]
@@ -1232,8 +1225,8 @@ class GameScreen:
         if self.state=="victory": self._draw_victory(surf); return
 
         blind=self._current_blind()
-        draw_rect_rounded(surf,COL["panel"],(10,10,300,215),12,200)
-        draw_border(surf,COL["purple"],(10,10,300,215),1,12)
+        draw_rect_rounded(surf,COL["panel"],(10,10,300,230),12,200)
+        draw_border(surf,COL["purple"],(10,10,300,230),1,12)
         draw_text(surf,f"Score: {self.anim_score:,}",F["big"],COL["gold"],20,18)
         draw_text(surf,f"Objectif: {blind.target:,}",F["sm"],COL["white"],20,58)
         draw_text(surf,f"Blind: {blind.name}",F["xs"],COL["dim"],20,82)
@@ -1249,10 +1242,11 @@ class GameScreen:
         if self.deck.has_wildcard():
             wt=self.deck._wildcard
             wc_col=COL["troll"] if wt and wt.is_troll else COL["mystique"]
-            wc_lbl="[TROLL] dans deck !" if (wt and wt.is_troll) else "[WILD] dans deck"
-            draw_text(surf,wc_lbl,F["xs"],wc_col,20,hud_y); hud_y+=16
+            draw_text(surf,"[TROLL] deck!" if (wt and wt.is_troll) else "[WILD] deck",F["xs"],wc_col,20,hud_y); hud_y+=16
         if self.player.has_bob:
-            draw_text(surf,f"[BOB] slots:{self.player.max_jokers}",F["xs"],COL["gold"],20,hud_y)
+            draw_text(surf,f"[BOB] slots:{self.player.max_jokers}",F["xs"],COL["gold"],20,hud_y); hud_y+=16
+        if self.player.bonus_hands or self.player.bonus_discards:
+            draw_text(surf,f"+{self.player.bonus_hands}M +{self.player.bonus_discards}D/round",F["xs"],COL["green"],20,hud_y)
 
         if self.player.jokers:
             jx=320; sw=90; pw=len(self.player.jokers)*sw+10
@@ -1273,8 +1267,7 @@ class GameScreen:
         for p in self.particles: p.draw(surf)
 
         card_x0=(W-(self.HAND_SIZE*82))//2
-        for i,card in enumerate(self.hand):
-            card.draw(surf,card_x0+i*82,H-160)
+        for i,card in enumerate(self.hand): card.draw(surf,card_x0+i*82,H-160)
 
         self.btn_play.draw(surf); self.btn_disc.draw(surf)
         draw_text(surf,"Entree=Jouer | D=Defausser | 1-8=Selectionner | F11=Plein ecran",
@@ -1300,14 +1293,14 @@ class GameScreen:
             draw_text(surf,"BALTROU",F["title"],(60,10,80),W//2+off[0],H//2-80+off[1],center=True)
         draw_text(surf,"BALTROU",F["title"],COL["gold"],W//2,H//2-80,center=True)
         draw_text(surf,"Poker Roguelite",F["big"],COL["purple"],W//2,H//2-22,center=True)
-        draw_rect_rounded(surf,COL["panel"],(W//2-290,H//2+20,580,140),14,210)
-        draw_border(surf,COL["dim"],(W//2-290,H//2+20,580,140),1,14)
+        draw_rect_rounded(surf,COL["panel"],(W//2-310,H//2+20,620,145),14,210)
+        draw_border(surf,COL["dim"],(W//2-310,H//2+20,620,145),1,14)
         draw_text(surf,"Cliquez ou appuyez sur une touche pour commencer",
                   F["med"],COL["white"],W//2,H//2+55,center=True)
-        draw_text(surf,"Selectionnez jusqu'a 5 cartes  |  Touches 1-8 pour selectionner",
+        draw_text(surf,"Selectionnez jusqu a 5 cartes  |  Touches 1-8 pour selectionner",
                   F["xs"],COL["dim"],W//2,H//2+88,center=True)
-        draw_text(surf,"Cherchez La Roulette (MYSTIQUE) dans la boutique apres chaque blind !",
-                  F["xs"],COL["mystique"],W//2,H//2+112,center=True)
+        draw_text(surf,"La Roulette (MYSTIQUE) et BOB (LEGENDAIRE) apparaissent dans la boutique !",
+                  F["xs"],COL["mystique"],W//2,H//2+110,center=True)
         draw_text(surf,"Entree=Jouer  |  D=Defausser  |  F11=Plein ecran",
                   F["xs"],COL["dim"],W//2,H//2+132,center=True)
 
@@ -1330,51 +1323,24 @@ class GameScreen:
         draw_text(surf,"Rejouer",F["med"],COL["white"],W//2,H//2+115,center=True)
 
 
-# ──────────────────────────────────────────────
-#  DEBUG
-# ──────────────────────────────────────────────
-def debug_hand(cards):
-    hr,scoring=HandEvaluator.evaluate(cards)
-    print("Main reconnue :", hr.name_fr)
-    print("Scoring :", [(getattr(c,'rank',None) and c.rank.display or 'WILD',
-                         getattr(c,'suit',None) and SUIT_SYMBOLS[c.suit.symbol] or '?')
-                        for c in scoring])
-    print("----------")
-
-
 if __name__=="__main__":
-    # Test wildcard qui complete une suite
-    wc=WildcardJokerCard()
-    test=[Card(Rank.FIVE,Suit.HEART),Card(Rank.SIX,Suit.CLUB),
-          Card(Rank.SEVEN,Suit.SPADE),Card(Rank.EIGHT,Suit.DIAMOND),wc]
-    debug_hand(test)
-
     game=GameScreen()
     running=True
     while running:
         for event in pygame.event.get():
             if event.type==pygame.QUIT: running=False; break
-            # Plein ecran : F11 ou Alt+Entree
             if event.type==pygame.KEYDOWN:
                 if event.key==pygame.K_F11 or (event.key==pygame.K_RETURN and event.mod & pygame.KMOD_ALT):
-                    toggle_fullscreen()
-                    continue
-            # Redimensionnement fenetre
+                    toggle_fullscreen(); continue
             if event.type==pygame.VIDEORESIZE and not fullscreen:
-                screen=pygame.display.set_mode((event.w,event.h),pygame.RESIZABLE)
-                continue
-            # Patch coordonnees souris dans les events
+                screen=pygame.display.set_mode((event.w,event.h),pygame.RESIZABLE); continue
             event=_patch_event_pos(event)
             game.handle(event)
         game.update()
-        # Rendu sur surface interne 1280x800 puis scale vers la fenetre
         game.draw(render_surf)
-        scale, ox, oy = get_scale_offset()
-        scaled = pygame.transform.smoothscale(render_surf,
-                    (int(W*scale), int(H*scale)))
-        screen.fill((0,0,0))
-        screen.blit(scaled, (int(ox), int(oy)))
+        scale,ox,oy=get_scale_offset()
+        scaled=pygame.transform.smoothscale(render_surf,(int(W*scale),int(H*scale)))
+        screen.fill((0,0,0)); screen.blit(scaled,(int(ox),int(oy)))
         pygame.display.flip()
         clock.tick(FPS)
-    pygame.quit()
-    sys.exit()
+    pygame.quit(); sys.exit()
