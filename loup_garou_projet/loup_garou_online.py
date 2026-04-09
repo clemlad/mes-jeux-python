@@ -3,8 +3,8 @@ import socket
 import threading
 import pygame
 
-BASE_W, BASE_H = 1220, 820
-MIN_W, MIN_H = 960, 680
+BASE_W, BASE_H = 1320, 860
+MIN_W, MIN_H = 1020, 700
 FPS = 60
 BG_TOP = (18, 16, 36)
 BG_BOTTOM = (56, 32, 70)
@@ -92,6 +92,48 @@ class Button:
         return self.enabled and self.rect.collidepoint(pos)
 
 
+class InputBox:
+    def __init__(self, placeholder="Écris un message..."):
+        self.rect = pygame.Rect(0, 0, 0, 0)
+        self.text = ""
+        self.active = False
+        self.placeholder = placeholder
+        self.max_len = 220
+
+    def set_rect(self, rect):
+        self.rect = pygame.Rect(rect)
+
+    def draw(self, surface, font):
+        color = (40, 30, 62) if self.active else (26, 20, 46)
+        pygame.draw.rect(surface, color, self.rect, border_radius=14)
+        pygame.draw.rect(surface, CYAN if self.active else BUTTON_BORDER, self.rect, 2, border_radius=14)
+        display = self.text or self.placeholder
+        img = font.render(display, True, WHITE if self.text else (170, 180, 205))
+        clipped = img
+        if img.get_width() > self.rect.width - 20:
+            display = display[-max(1, len(display) // 2):]
+            clipped = font.render(display, True, WHITE if self.text else (170, 180, 205))
+        surface.blit(clipped, (self.rect.x + 10, self.rect.centery - clipped.get_height() // 2))
+
+    def handle_event(self, event):
+        submit = False
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            self.active = self.rect.collidepoint(event.pos)
+        elif event.type == pygame.KEYDOWN and self.active:
+            if event.key == pygame.K_BACKSPACE:
+                self.text = self.text[:-1]
+            elif event.key == pygame.K_RETURN:
+                submit = True
+            elif len(self.text) < self.max_len and event.unicode.isprintable():
+                self.text += event.unicode
+        return submit
+
+    def consume(self):
+        text = self.text.strip()
+        self.text = ""
+        return text
+
+
 def draw_vertical_gradient(surface, top_color, bottom_color):
     width, height = surface.get_size()
     for y in range(height):
@@ -141,10 +183,15 @@ class WerewolfOnlineGame:
         self.night_target_name = None
         self.seer_result = None
         self.can_act = False
+        self.max_players = 12
+        self.role_config = {}
+        self.chat_history = []
         self.start_btn = Button("LANCER LA PARTIE", (90, 120, 80), (110, 145, 95))
         self.vote_btn = Button("VALIDER L'ACTION", (55, 85, 125), (75, 105, 155))
         self.sync_btn = Button("SYNCHRONISER", (70, 70, 110), (90, 90, 140))
         self.skip_btn = Button("PASSER", (120, 85, 60), (150, 105, 75))
+        self.chat_send_btn = Button("ENVOYER", (55, 85, 125), (75, 105, 155))
+        self.chat_input = InputBox()
         self.player_rects = []
         self.compute_layout()
 
@@ -152,26 +199,26 @@ class WerewolfOnlineGame:
         w, h = self.screen.get_size()
         scale = min(w / BASE_W, h / BASE_H)
         return {
-            "small": pygame.font.SysFont("arial", max(18, int(21 * scale))),
-            "medium": pygame.font.SysFont("arial", max(24, int(28 * scale))),
-            "big": pygame.font.SysFont("arial", max(34, int(42 * scale))),
-            "title": pygame.font.SysFont("arial", max(42, int(54 * scale)), bold=True),
+            "small": pygame.font.SysFont("arial", max(16, int(19 * scale))),
+            "medium": pygame.font.SysFont("arial", max(22, int(26 * scale))),
+            "big": pygame.font.SysFont("arial", max(30, int(38 * scale))),
+            "title": pygame.font.SysFont("arial", max(40, int(52 * scale)), bold=True),
         }
 
     def compute_layout(self):
         w, h = self.screen.get_size()
         self.top_rect = pygame.Rect(20, 20, w - 40, 90)
-        self.left_rect = pygame.Rect(20, 130, int(w * 0.42), h - 200)
-        self.right_rect = pygame.Rect(self.left_rect.right + 20, 130, w - self.left_rect.width - 60, h - 200)
+        self.left_rect = pygame.Rect(20, 130, int(w * 0.33), h - 200)
+        self.right_rect = pygame.Rect(self.left_rect.right + 20, 130, int(w * 0.31), h - 200)
+        self.chat_rect = pygame.Rect(self.right_rect.right + 20, 130, w - self.left_rect.width - self.right_rect.width - 80, h - 200)
         self.bottom_rect = pygame.Rect(20, h - 60, w - 40, 40)
         btn_w = min(260, self.right_rect.width - 40)
         self.start_btn.set_rect((self.right_rect.x + 20, self.right_rect.bottom - 60, btn_w, 44))
         self.vote_btn.set_rect((self.right_rect.x + 20, self.right_rect.bottom - 60, btn_w, 44))
-        self.skip_btn.set_rect((self.right_rect.x + 20 + btn_w + 14, self.right_rect.bottom - 60, max(150, self.right_rect.width - btn_w - 54), 44))
+        self.skip_btn.set_rect((self.right_rect.x + 20 + btn_w + 14, self.right_rect.bottom - 60, max(140, self.right_rect.width - btn_w - 54), 44))
         self.sync_btn.set_rect((self.top_rect.right - 220, self.top_rect.y + 22, 200, 42))
-
-    def living_targets(self):
-        return [p for p in self.players if p["alive"] and p["id"] != self.your_id]
+        self.chat_input.set_rect((self.chat_rect.x + 18, self.chat_rect.bottom - 58, self.chat_rect.width - 136, 42))
+        self.chat_send_btn.set_rect((self.chat_rect.right - 104, self.chat_rect.bottom - 58, 86, 42))
 
     def current_role(self):
         if self.your_id is None:
@@ -199,6 +246,9 @@ class WerewolfOnlineGame:
                 self.can_act = msg.get("can_act", False)
                 self.action_hint = msg.get("action_hint", "")
                 self.seer_result = msg.get("seer_result")
+                self.max_players = msg.get("max_players", self.max_players)
+                self.role_config = msg.get("role_config", self.role_config)
+                self.chat_history = msg.get("chat_history", self.chat_history)
                 if self.selected_target is not None and all(p["id"] != self.selected_target or not p["alive"] for p in self.players):
                     self.selected_target = None
             elif msg_type == "error":
@@ -230,6 +280,11 @@ class WerewolfOnlineGame:
         if self.phase == "night" and self.current_role() == "Sorciere":
             self.network.send({"type": "night_action", "action": "witch_save"})
 
+    def send_chat(self):
+        text = self.chat_input.consume()
+        if text:
+            self.network.send({"type": "chat_message", "message": text})
+
     def draw_player_list(self):
         f = self.fonts()
         draw_glass_panel(self.screen, self.left_rect, radius=22)
@@ -252,8 +307,7 @@ class WerewolfOnlineGame:
     def draw_info_panel(self):
         f = self.fonts()
         draw_glass_panel(self.screen, self.right_rect, radius=22)
-        title = f"{self.server_name}"
-        draw_text(self.screen, title, f["big"], WHITE, topleft=(self.right_rect.x + 18, self.right_rect.y + 14))
+        draw_text(self.screen, self.server_name, f["big"], WHITE, topleft=(self.right_rect.x + 18, self.right_rect.y + 14))
         phase_label = {
             "lobby": "Lobby",
             "night": f"Nuit {self.day_count}",
@@ -263,25 +317,32 @@ class WerewolfOnlineGame:
         draw_text(self.screen, phase_label, f["medium"], GOLD, topleft=(self.right_rect.x + 20, self.right_rect.y + 68))
         role = self.current_role() or "Non attribué"
         draw_text(self.screen, f"Ton rôle : {role}", f["medium"], CYAN, topleft=(self.right_rect.x + 20, self.right_rect.y + 104))
-        draw_text(self.screen, self.message, f["small"], WHITE, topleft=(self.right_rect.x + 20, self.right_rect.y + 148))
+        draw_text(self.screen, f"Places : {len(self.players)}/{self.max_players}", f["small"], WHITE, topleft=(self.right_rect.x + 20, self.right_rect.y + 138))
+        roles_line = f"Config : {self.role_config.get('Loup-garou', 1)} loup(x)"
+        if self.role_config.get("Voyante", 0):
+            roles_line += ", voyante"
+        if self.role_config.get("Sorciere", 0):
+            roles_line += ", sorcière"
+        draw_text(self.screen, roles_line, f["small"], WHITE, topleft=(self.right_rect.x + 20, self.right_rect.y + 164))
+        draw_text(self.screen, self.message, f["small"], WHITE, topleft=(self.right_rect.x + 20, self.right_rect.y + 198))
         if self.action_hint:
-            draw_text(self.screen, self.action_hint, f["small"], GOLD, topleft=(self.right_rect.x + 20, self.right_rect.y + 180))
+            draw_text(self.screen, self.action_hint, f["small"], GOLD, topleft=(self.right_rect.x + 20, self.right_rect.y + 228))
         if self.night_target_name:
-            draw_text(self.screen, f"Victime visée : {self.night_target_name}", f["small"], RED, topleft=(self.right_rect.x + 20, self.right_rect.y + 214))
+            draw_text(self.screen, f"Victime visée : {self.night_target_name}", f["small"], RED, topleft=(self.right_rect.x + 20, self.right_rect.y + 258))
         if self.seer_result:
-            draw_text(self.screen, self.seer_result, f["small"], GREEN, topleft=(self.right_rect.x + 20, self.right_rect.y + 248))
+            draw_text(self.screen, self.seer_result, f["small"], GREEN, topleft=(self.right_rect.x + 20, self.right_rect.y + 288))
         if self.last_deaths:
-            draw_text(self.screen, "Derniers éliminés : " + ", ".join(self.last_deaths), f["small"], RED, topleft=(self.right_rect.x + 20, self.right_rect.y + 282))
-        y = self.right_rect.y + 330
+            draw_text(self.screen, "Derniers éliminés : " + ", ".join(self.last_deaths), f["small"], RED, topleft=(self.right_rect.x + 20, self.right_rect.y + 318))
+        y = self.right_rect.y + 360
         for line in [
             "Règles de cette version :",
-            "- minimum 4 joueurs",
-            "- rôles : loup, voyante, sorcière, villageois",
-            "- pas de chat intégré pour l'instant",
-            "- la sorcière a une potion de soin et une de mort",
+            "- cible un joueur vivant à gauche",
+            "- le créateur lance la partie",
+            "- le chat est modéré automatiquement",
+            "- synchronisation manuelle possible",
         ]:
             draw_text(self.screen, line, f["small"], WHITE, topleft=(self.right_rect.x + 20, y))
-            y += 30
+            y += 28
 
         mouse = pygame.mouse.get_pos()
         is_host = self.your_id == self.host_id
@@ -291,22 +352,38 @@ class WerewolfOnlineGame:
             self.vote_btn.text = "VALIDER LE VOTE" if self.phase == "day" else "VALIDER L'ACTION"
             self.vote_btn.draw(self.screen, f["small"], mouse, enabled=self.can_act and self.selected_target is not None)
             if self.phase == "night" and role == "Sorciere":
-                skip_text = "PASSER" if not self.night_target_name else "SAUVER"
-                self.skip_btn.text = skip_text
+                self.skip_btn.text = "PASSER" if not self.night_target_name else "SAUVER"
                 self.skip_btn.draw(self.screen, f["small"], mouse, enabled=self.can_act)
+
+    def draw_chat_panel(self):
+        f = self.fonts()
+        draw_glass_panel(self.screen, self.chat_rect, radius=22)
+        draw_text(self.screen, "Chat", f["big"], WHITE, topleft=(self.chat_rect.x + 18, self.chat_rect.y + 14))
+        y = self.chat_rect.y + 62
+        visible = self.chat_history[-12:]
+        for entry in visible:
+            color = GOLD if entry.get("system") else CYAN
+            prefix = "[Système]" if entry.get("system") else entry.get("author", "?")
+            draw_text(self.screen, f"{prefix} :", f["small"], color, topleft=(self.chat_rect.x + 18, y))
+            y += 20
+            draw_text(self.screen, entry.get("message", ""), f["small"], WHITE, topleft=(self.chat_rect.x + 26, y))
+            y += 28
+        self.chat_input.draw(self.screen, f["small"])
+        self.chat_send_btn.draw(self.screen, f["small"], pygame.mouse.get_pos(), enabled=True)
 
     def draw(self):
         draw_vertical_gradient(self.screen, BG_TOP, BG_BOTTOM)
         f = self.fonts()
         draw_glass_panel(self.screen, self.top_rect, radius=22)
         draw_text(self.screen, "LOUP-GAROU ONLINE", f["title"], WHITE, center=(self.top_rect.centerx, self.top_rect.y + 32))
-        draw_text(self.screen, "Jeu réseau local à partir de ta structure Bataille Navale", f["small"], CYAN, center=(self.top_rect.centerx, self.top_rect.y + 68))
+        draw_text(self.screen, "Solo contre IA ou réseau local avec lobby configurable", f["small"], CYAN, center=(self.top_rect.centerx, self.top_rect.y + 68))
         self.sync_btn.draw(self.screen, f["small"], pygame.mouse.get_pos(), enabled=True)
         if self.state == "connecting":
             draw_text(self.screen, "Connexion au serveur...", f["big"], WHITE, center=self.screen.get_rect().center)
             return
         self.draw_player_list()
         self.draw_info_panel()
+        self.draw_chat_panel()
         draw_text(self.screen, "Clique sur un joueur vivant pour le cibler.", f["small"], WHITE, center=self.bottom_rect.center)
 
     def handle_event(self, event):
@@ -314,10 +391,16 @@ class WerewolfOnlineGame:
             self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
             self.compute_layout()
             return
+        if self.chat_input.handle_event(event):
+            self.send_chat()
+            return
         if event.type != pygame.MOUSEBUTTONDOWN:
             return
         if self.sync_btn.is_clicked(event.pos):
             self.network.send({"type": "sync_request"})
+            return
+        if self.chat_send_btn.is_clicked(event.pos):
+            self.send_chat()
             return
         for pid, rect in self.player_rects:
             if rect.collidepoint(event.pos):

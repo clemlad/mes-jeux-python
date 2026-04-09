@@ -2,16 +2,20 @@ import json
 import socket
 import threading
 from collections import Counter
+from pathlib import Path
 
-from loup_shared import MIN_PLAYERS, MAX_PLAYERS, build_roles, check_winner, serialize_players_for
+from chat_moderation import ChatModerator
+from loup_shared import MIN_PLAYERS, MAX_PLAYERS, build_roles, check_winner, role_config_label, serialize_players_for
 from server_discovery import ServerBroadcaster, get_local_ip
 
 HOST = "0.0.0.0"
 PORT = 5555
+BASE_DIR = Path(__file__).resolve().parent
+MODERATION_CSV = BASE_DIR / "moderation_loup_garou_fr_en.csv"
 
 
 class WerewolfServer:
-    def __init__(self, host_name="Joueur", host=HOST, port=PORT):
+    def __init__(self, host_name="Joueur", host=HOST, port=PORT, max_players=MAX_PLAYERS, role_config=None):
         self.host = host
         self.port = port
         self.server_name = f"Salon de {host_name}"
@@ -20,8 +24,13 @@ class WerewolfServer:
         self.lock = threading.Lock()
         self.running = True
         self.host_ip = get_local_ip()
+        self.max_players = max(MIN_PLAYERS, min(MAX_PLAYERS, int(max_players)))
+        self.role_config = role_config or {"Loup-garou": 1, "Voyante": 1, "Sorciere": 1}
         self.broadcaster = ServerBroadcaster(self.server_name, host_ip=self.host_ip, game_port=self.port)
-        self.clients = [None] * MAX_PLAYERS
+        self.broadcaster.set_room_config(self.max_players, role_config_label(self.role_config))
+        self.clients = [None] * self.max_players
+        self.chat_history = []
+        self.moderator = ChatModerator(MODERATION_CSV)
         self.reset_lobby_state()
 
     def reset_lobby_state(self):
@@ -36,7 +45,6 @@ class WerewolfServer:
         self.pending_night = {}
         self.wolf_votes = {}
         self.day_votes = {}
-        self.seer_used = False
         self.witch_heal_used = False
         self.witch_poison_used = False
         self.pending_wolf_target = None
@@ -47,10 +55,15 @@ class WerewolfServer:
     def send_json(self, conn, data):
         conn.sendall((json.dumps(data) + "\n").encode("utf-8"))
 
+    def append_chat(self, author, message, system=False):
+        entry = {"author": author, "message": message[:220], "system": system}
+        self.chat_history.append(entry)
+        self.chat_history = self.chat_history[-40:]
+
     def broadcast_snapshots(self):
         for player in self.players:
-            conn = self.clients[player["id"]]
-            if conn is None:
+            conn = self.clients[player["id"]] if player["id"] < len(self.clients) else None
+            if conn is None or not player.get("connected"):
                 continue
             try:
                 self.send_json(conn, self.player_snapshot(player["id"]))
@@ -97,6 +110,9 @@ class WerewolfServer:
             "seer_result": self.pending_night.get(("seer_result", player_id)),
             "wolf_count": len(wolves_alive),
             "connected_count": self.connected_player_count(),
+            "max_players": self.max_players,
+            "role_config": self.role_config,
+            "chat_history": list(self.chat_history),
         }
 
     def remove_client(self, player_id):
@@ -104,6 +120,7 @@ class WerewolfServer:
         if player_id < len(self.players):
             self.players[player_id]["alive"] = False
             self.players[player_id]["connected"] = False
+            self.append_chat("Système", f"{self.players[player_id]['name']} a quitté la partie.", system=True)
         self.broadcaster.set_player_count(self.connected_player_count())
         self.message = "Un joueur s'est déconnecté."
         self.winner = check_winner(self.players) if self.game_started else None
@@ -122,6 +139,7 @@ class WerewolfServer:
             })
         self.players[player_id].update({"name": name, "connected": True, "alive": True})
         self.message = f"{name} a rejoint la partie."
+        self.append_chat("Système", self.message, system=True)
         self.broadcaster.set_player_count(self.connected_player_count())
         self.broadcast_snapshots()
         return self.player_snapshot(player_id)
@@ -132,7 +150,10 @@ class WerewolfServer:
         active_players = [p for p in self.players if p.get("connected")]
         if len(active_players) < MIN_PLAYERS:
             return {"type": "error", "message": f"Il faut au moins {MIN_PLAYERS} joueurs."}
-        roles = build_roles(len(active_players))
+        try:
+            roles = build_roles(len(active_players), self.role_config)
+        except ValueError as exc:
+            return {"type": "error", "message": str(exc)}
         for p, role in zip(active_players, roles):
             p["role"] = role
             p["alive"] = True
@@ -141,6 +162,7 @@ class WerewolfServer:
         self.winner = None
         self.day_count = 0
         self.message = "La partie commence. La nuit tombe..."
+        self.append_chat("Système", f"La partie démarre avec {role_config_label(self.role_config)}.", system=True)
         self.start_night()
         return None
 
@@ -155,7 +177,6 @@ class WerewolfServer:
         self.wolf_votes = {}
         self.day_votes = {}
         self.pending_wolf_target = None
-        self.seer_used = False
         self.message = f"Nuit {self.day_count} : les rôles de nuit agissent."
         self.broadcast_snapshots()
 
@@ -288,6 +309,24 @@ class WerewolfServer:
         self.broadcast_snapshots()
         return self.player_snapshot(player_id)
 
+    def handle_chat(self, player_id, msg):
+        raw = str(msg.get("message", "")).strip()
+        if not raw:
+            return self.player_snapshot(player_id)
+        raw = raw[:220]
+        clean, flagged = self.moderator.moderate(raw)
+        author = self.players[player_id]["name"] if player_id < len(self.players) else f"Joueur {player_id + 1}"
+
+        if flagged:
+            clean = "*" * len(raw)
+
+        self.append_chat(author, clean)
+
+        if flagged:
+            self.append_chat("Système", f"Un message de {author} a été modéré automatiquement.", system=True)
+        self.broadcast_snapshots()
+        return self.player_snapshot(player_id)
+
     def handle_client(self, conn, player_id):
         buffer = ""
         try:
@@ -311,6 +350,8 @@ class WerewolfServer:
                             response = self.handle_night_action(player_id, msg)
                         elif kind == "vote_action":
                             response = self.handle_vote(player_id, msg)
+                        elif kind == "chat_message":
+                            response = self.handle_chat(player_id, msg)
                         elif kind == "sync_request":
                             response = self.player_snapshot(player_id)
                         else:
@@ -321,7 +362,7 @@ class WerewolfServer:
             pass
         finally:
             with self.lock:
-                if self.clients[player_id] is conn:
+                if player_id < len(self.clients) and self.clients[player_id] is conn:
                     self.remove_client(player_id)
             try:
                 conn.close()
@@ -350,11 +391,12 @@ class WerewolfServer:
 
     def serve_forever(self):
         self.server.bind((self.host, self.port))
-        self.server.listen(MAX_PLAYERS)
+        self.server.listen(self.max_players)
         self.server.settimeout(1.0)
         self.broadcaster.start()
         print(f"Serveur lancé sur {self.host}:{self.port}")
         print(f"IP locale du serveur : {self.host_ip}")
+        print(f"Configuration : max {self.max_players} joueurs | {role_config_label(self.role_config)}")
         while self.running:
             try:
                 conn, addr = self.server.accept()

@@ -31,9 +31,16 @@ class ServerBroadcaster:
         self.thread = None
         self.player_count = 1
         self.max_players = 12
+        self.role_summary = "1 loup(s), voyante, sorcière"
 
     def set_player_count(self, count):
         self.player_count = count
+
+    def set_room_config(self, max_players=None, role_summary=None):
+        if max_players is not None:
+            self.max_players = max_players
+        if role_summary is not None:
+            self.role_summary = role_summary
 
     def start(self):
         if self.running:
@@ -55,10 +62,13 @@ class ServerBroadcaster:
             "port": self.game_port,
             "players": self.player_count,
             "max_players": self.max_players,
+            "roles": self.role_summary,
         }
         try:
             while self.running:
                 payload["players"] = self.player_count
+                payload["max_players"] = self.max_players
+                payload["roles"] = self.role_summary
                 data = json.dumps(payload).encode("utf-8")
                 sock.sendto(data, ("255.255.255.255", DISCOVERY_PORT))
                 time.sleep(DISCOVERY_INTERVAL)
@@ -116,6 +126,7 @@ class ServerDiscovery:
                         "port": port,
                         "players": msg.get("players", 0),
                         "max_players": msg.get("max_players", 12),
+                        "roles": msg.get("roles", "Configuration par défaut"),
                         "last_seen": time.time(),
                     }
                 self._cleanup()

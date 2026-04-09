@@ -2,12 +2,13 @@ import threading
 import time
 import pygame
 
-from loup_server import WerewolfServer
 from loup_garou_online import WerewolfOnlineGame
+from loup_garou_solo import WerewolfSoloGame
+from loup_server import WerewolfServer
 from server_discovery import ServerDiscovery
 
-BASE_W, BASE_H = 1000, 700
-MIN_W, MIN_H = 820, 620
+BASE_W, BASE_H = 1100, 760
+MIN_W, MIN_H = 900, 680
 BG_TOP = (18, 16, 36)
 BG_BOTTOM = (56, 32, 70)
 WHITE = (240, 240, 245)
@@ -21,6 +22,8 @@ BLUE = (70, 80, 125)
 BLUE_H = (95, 100, 155)
 RED = (125, 62, 80)
 RED_H = (150, 82, 102)
+PURPLE = (96, 74, 140)
+PURPLE_H = (118, 96, 168)
 
 
 class Button:
@@ -45,10 +48,11 @@ class Button:
 
 
 class InputBox:
-    def __init__(self, text=""):
+    def __init__(self, text="", placeholder=""):
         self.rect = pygame.Rect(0, 0, 0, 0)
         self.text = text
         self.active = False
+        self.placeholder = placeholder
 
     def set_rect(self, rect):
         self.rect = pygame.Rect(rect)
@@ -57,11 +61,11 @@ class InputBox:
         color = (40, 30, 62) if self.active else (26, 20, 46)
         pygame.draw.rect(surface, color, self.rect, border_radius=14)
         pygame.draw.rect(surface, CYAN if self.active else BUTTON_BORDER, self.rect, 2, border_radius=14)
-        display = self.text or "Entre ton nom"
+        display = self.text or self.placeholder
         img = font.render(display, True, WHITE if self.text else (170, 180, 205))
         surface.blit(img, (self.rect.x + 14, self.rect.centery - img.get_height() // 2))
 
-    def handle_event(self, event):
+    def handle_event(self, event, max_len=20):
         if event.type == pygame.MOUSEBUTTONDOWN:
             self.active = self.rect.collidepoint(event.pos)
         elif event.type == pygame.KEYDOWN and self.active:
@@ -69,8 +73,68 @@ class InputBox:
                 self.text = self.text[:-1]
             elif event.key == pygame.K_RETURN:
                 pass
-            elif len(self.text) < 20 and event.unicode.isprintable():
+            elif len(self.text) < max_len and event.unicode.isprintable():
                 self.text += event.unicode
+
+
+class Stepper:
+    def __init__(self, label, value, minimum, maximum):
+        self.label = label
+        self.value = value
+        self.minimum = minimum
+        self.maximum = maximum
+        self.minus_btn = Button("-", RED, RED_H)
+        self.plus_btn = Button("+", GREEN, GREEN_H)
+        self.display_rect = pygame.Rect(0, 0, 0, 0)
+
+    def set_layout(self, x, y, width):
+        self.minus_btn.set_rect((x, y, 44, 42))
+        self.display_rect = pygame.Rect(x + 54, y, width - 108, 42)
+        self.plus_btn.set_rect((x + width - 44, y, 44, 42))
+
+    def draw(self, surface, font, small_font, mouse_pos):
+        self.minus_btn.draw(surface, font, mouse_pos)
+        self.plus_btn.draw(surface, font, mouse_pos)
+        pygame.draw.rect(surface, (26, 20, 46), self.display_rect, border_radius=12)
+        pygame.draw.rect(surface, BUTTON_BORDER, self.display_rect, 2, border_radius=12)
+        img = font.render(str(self.value), True, WHITE)
+        surface.blit(img, img.get_rect(center=self.display_rect.center))
+        draw_text(surface, self.label, small_font, CYAN, topleft=(self.display_rect.x, self.display_rect.y - 24))
+
+    def handle_click(self, pos):
+        if self.minus_btn.is_clicked(pos):
+            self.value = max(self.minimum, self.value - 1)
+            return True
+        if self.plus_btn.is_clicked(pos):
+            self.value = min(self.maximum, self.value + 1)
+            return True
+        return False
+
+
+class Toggle:
+    def __init__(self, label, enabled=True):
+        self.label = label
+        self.enabled = enabled
+        self.rect = pygame.Rect(0, 0, 0, 0)
+
+    def set_rect(self, rect):
+        self.rect = pygame.Rect(rect)
+
+    def draw(self, surface, font, mouse_pos):
+        hovered = self.rect.collidepoint(mouse_pos)
+        base = (60, 102, 82) if self.enabled else (78, 44, 58)
+        hover = (80, 128, 104) if self.enabled else (100, 62, 78)
+        pygame.draw.rect(surface, hover if hovered else base, self.rect, border_radius=12)
+        pygame.draw.rect(surface, BUTTON_BORDER, self.rect, 2, border_radius=12)
+        text = f"{self.label} : {'Oui' if self.enabled else 'Non'}"
+        img = font.render(text, True, WHITE)
+        surface.blit(img, img.get_rect(center=self.rect.center))
+
+    def handle_click(self, pos):
+        if self.rect.collidepoint(pos):
+            self.enabled = not self.enabled
+            return True
+        return False
 
 
 def draw_vertical_gradient(surface, top_color, bottom_color):
@@ -106,19 +170,29 @@ class Launcher:
         pygame.display.set_caption("Loup-Garou - Menu")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.state = "menu"
+        self.state = "main"
 
-        self.input_name = InputBox()
-        self.create_btn = Button("CRÉER UNE PARTIE", GREEN, GREEN_H)
-        self.join_btn = Button("REJOINDRE UNE PARTIE", BLUE, BLUE_H)
-        self.back_btn = Button("RETOUR", RED, RED_H)
+        self.input_name = InputBox(placeholder="Entre ton nom")
+        self.main_solo_btn = Button("MODE SOLO", PURPLE, PURPLE_H)
+        self.main_online_btn = Button("MODE EN LIGNE", BLUE, BLUE_H)
         self.quit_btn = Button("QUITTER", RED, RED_H)
 
+        self.online_create_btn = Button("CRÉER UN SERVEUR", GREEN, GREEN_H)
+        self.online_join_btn = Button("REJOINDRE UN SERVEUR", BLUE, BLUE_H)
+        self.config_launch_btn = Button("LANCER LE SERVEUR", GREEN, GREEN_H)
+        self.solo_launch_btn = Button("LANCER LE SOLO", GREEN, GREEN_H)
+        self.back_btn = Button("RETOUR", RED, RED_H)
+
+        self.max_players_stepper = Stepper("Joueurs max dans la room", 8, 4, 12)
+        self.wolves_stepper = Stepper("Nombre de loups", 1, 1, 3)
+        self.voyante_toggle = Toggle("Voyante", True)
+        self.sorciere_toggle = Toggle("Sorcière", True)
+        self.solo_players_stepper = Stepper("Nombre total de joueurs", 6, 4, 12)
 
         self.discovery = ServerDiscovery()
         self.discovery.start()
 
-        self.message = "Choisis ton nom puis crée ou rejoins une partie."
+        self.message = "Choisis ton nom, puis solo ou en ligne."
         self.hosted_server = None
         self.host_thread = None
         self.selected_index = 0
@@ -137,31 +211,37 @@ class Launcher:
         name = self.input_name.text.strip()
         return name[:20] if name else "Joueur"
 
+    def role_config(self):
+        return {
+            "Loup-garou": self.wolves_stepper.value,
+            "Voyante": 1 if self.voyante_toggle.enabled else 0,
+            "Sorciere": 1 if self.sorciere_toggle.enabled else 0,
+        }
+
     def reset_menu_state(self):
-        self.state = "menu"
+        self.state = "main"
         self.selected_index = 0
         self.row_rects = []
-        self.message = "Retour au menu."
+        self.message = "Retour au menu principal."
 
-    def launch_game(self, host, shutdown_server_after=False):
+    def restore_window(self, size):
+        if not pygame.get_init():
+            pygame.init()
+        if not pygame.display.get_init():
+            pygame.display.init()
+        self.screen = pygame.display.set_mode(size, pygame.RESIZABLE)
+        pygame.display.set_caption("Loup-Garou - Menu")
+        self.clock = pygame.time.Clock()
+        pygame.event.clear()
+
+    def launch_online_game(self, host, shutdown_server_after=False):
         current_size = self.screen.get_size()
-
         try:
             game = WerewolfOnlineGame(host, self.valid_name())
             game.run()
         except Exception as e:
             self.message = f"Erreur pendant la partie : {e}"
-
-        if not pygame.get_init():
-            pygame.init()
-        if not pygame.display.get_init():
-            pygame.display.init()
-
-        self.screen = pygame.display.set_mode(current_size, pygame.RESIZABLE)
-        pygame.display.set_caption("Loup-Garou - Menu")
-        self.clock = pygame.time.Clock()
-        pygame.event.clear()
-
+        self.restore_window(current_size)
         if shutdown_server_after and self.hosted_server is not None:
             try:
                 self.hosted_server.shutdown()
@@ -169,7 +249,16 @@ class Launcher:
                 pass
             self.hosted_server = None
             self.host_thread = None
+        self.reset_menu_state()
 
+    def launch_solo_game(self):
+        current_size = self.screen.get_size()
+        try:
+            game = WerewolfSoloGame(self.valid_name(), self.solo_players_stepper.value, self.role_config())
+            game.run()
+        except Exception as e:
+            self.message = f"Erreur en solo : {e}"
+        self.restore_window(current_size)
         self.reset_menu_state()
 
     def create_server(self):
@@ -180,117 +269,192 @@ class Launcher:
                 pass
             self.hosted_server = None
             self.host_thread = None
-
-        self.hosted_server = WerewolfServer(host_name=self.valid_name())
-        self.host_thread = threading.Thread(
-            target=self.hosted_server.serve_forever,
-            daemon=True
+        self.hosted_server = WerewolfServer(
+            host_name=self.valid_name(),
+            max_players=self.max_players_stepper.value,
+            role_config=self.role_config(),
         )
+        self.host_thread = threading.Thread(target=self.hosted_server.serve_forever, daemon=True)
         self.host_thread.start()
         time.sleep(0.4)
-
-        self.launch_game("127.0.0.1", shutdown_server_after=True)
+        self.launch_online_game("127.0.0.1", shutdown_server_after=True)
 
     def join_selected_server(self):
         servers = self.discovery.get_servers()
         if not servers:
             self.message = "Aucun serveur trouvé sur le réseau local."
             return
-
         self.selected_index = max(0, min(self.selected_index, len(servers) - 1))
         host = servers[self.selected_index]["host"]
-        self.launch_game(host, shutdown_server_after=False)
+        self.launch_online_game(host, shutdown_server_after=False)
 
-    def menu_layout(self):
+    def main_layout(self):
         w, h = self.screen.get_size()
-        panel = pygame.Rect(w // 2 - 320, h // 2 - 210, 640, 420)
-        self.input_name.set_rect((panel.x + 120, panel.y + 110, 400, 50))
-        self.create_btn.set_rect((panel.x + 110, panel.y + 210, 420, 54))
-        self.join_btn.set_rect((panel.x + 110, panel.y + 288, 420, 54))
-        self.quit_btn.set_rect((panel.x + 110, panel.y + 360, 420, 50))
+        panel = pygame.Rect(w // 2 - 330, h // 2 - 230, 660, 460)
+        self.input_name.set_rect((panel.x + 120, panel.y + 110, 420, 50))
+        self.main_solo_btn.set_rect((panel.x + 120, panel.y + 200, 420, 54))
+        self.main_online_btn.set_rect((panel.x + 120, panel.y + 278, 420, 54))
+        self.quit_btn.set_rect((panel.x + 120, panel.y + 356, 420, 50))
+        return panel
+
+    def online_layout(self):
+        w, h = self.screen.get_size()
+        panel = pygame.Rect(w // 2 - 330, h // 2 - 230, 660, 460)
+        self.online_create_btn.set_rect((panel.x + 120, panel.y + 190, 420, 54))
+        self.online_join_btn.set_rect((panel.x + 120, panel.y + 268, 420, 54))
+        self.back_btn.set_rect((panel.x + 120, panel.y + 346, 420, 50))
+        return panel
+
+    def config_layout(self):
+        w, h = self.screen.get_size()
+        panel = pygame.Rect(w // 2 - 360, h // 2 - 250, 720, 500)
+        self.max_players_stepper.set_layout(panel.x + 110, panel.y + 120, 500)
+        self.wolves_stepper.set_layout(panel.x + 110, panel.y + 210, 500)
+        self.voyante_toggle.set_rect((panel.x + 110, panel.y + 300, 240, 46))
+        self.sorciere_toggle.set_rect((panel.x + 370, panel.y + 300, 240, 46))
+        self.config_launch_btn.set_rect((panel.x + 110, panel.y + 386, 500, 50))
+        self.back_btn.set_rect((panel.x + 110, panel.y + 446, 500, 38))
         return panel
 
     def join_layout(self):
         w, h = self.screen.get_size()
-        panel = pygame.Rect(70, 60, w - 140, h - 150)
-        self.back_btn.set_rect((panel.x, panel.bottom + 16, 160, 44))
+        panel = pygame.Rect(60, 50, w - 120, h - 130)
+        self.back_btn.set_rect((panel.x, panel.bottom + 14, 160, 42))
         return panel
 
-    def draw_menu(self):
+    def solo_layout(self):
+        w, h = self.screen.get_size()
+        panel = pygame.Rect(w // 2 - 330, h // 2 - 230, 660, 460)
+        self.solo_players_stepper.set_layout(panel.x + 100, panel.y + 180, 460)
+        self.solo_launch_btn.set_rect((panel.x + 100, panel.y + 300, 460, 52))
+        self.back_btn.set_rect((panel.x + 100, panel.y + 372, 460, 46))
+        return panel
+
+    def draw_main(self):
         f = self.fonts()
-        panel = self.menu_layout()
+        panel = self.main_layout()
         draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "LOUP-GAROU ONLINE", f["big"], WHITE, center=(panel.centerx, panel.y + 56))
-        draw_text(self.screen, "Nom du joueur", f["medium"], CYAN, center=(panel.centerx, panel.y + 88))
+        draw_text(self.screen, "LOUP-GAROU", f["big"], WHITE, center=(panel.centerx, panel.y + 56))
+        draw_text(self.screen, "Choisis ton pseudo", f["medium"], CYAN, center=(panel.centerx, panel.y + 88))
         self.input_name.draw(self.screen, f["medium"])
         mouse = pygame.mouse.get_pos()
-        self.create_btn.draw(self.screen, f["medium"], mouse)
-        self.join_btn.draw(self.screen, f["medium"], mouse)
+        self.main_solo_btn.draw(self.screen, f["medium"], mouse)
+        self.main_online_btn.draw(self.screen, f["medium"], mouse)
         self.quit_btn.draw(self.screen, f["medium"], mouse)
-        draw_text(self.screen, self.message, f["small"], WHITE, center=(panel.centerx, panel.bottom + 30))
+        draw_text(self.screen, self.message, f["small"], WHITE, center=(panel.centerx, panel.bottom + 28))
+
+    def draw_online(self):
+        f = self.fonts()
+        panel = self.online_layout()
+        draw_glass_panel(self.screen, panel)
+        draw_text(self.screen, "MODE EN LIGNE", f["big"], WHITE, center=(panel.centerx, panel.y + 70))
+        draw_text(self.screen, "Créer une room ou rejoindre un serveur local", f["small"], CYAN, center=(panel.centerx, panel.y + 120))
+        mouse = pygame.mouse.get_pos()
+        self.online_create_btn.draw(self.screen, f["medium"], mouse)
+        self.online_join_btn.draw(self.screen, f["medium"], mouse)
+        self.back_btn.draw(self.screen, f["medium"], mouse)
+
+    def draw_config(self):
+        f = self.fonts()
+        panel = self.config_layout()
+        draw_glass_panel(self.screen, panel)
+        draw_text(self.screen, "PANNEAU DE CONTRÔLE DU SERVEUR", f["big"], WHITE, center=(panel.centerx, panel.y + 60))
+        draw_text(self.screen, "Définis la taille de la room et les rôles de la partie", f["small"], CYAN, center=(panel.centerx, panel.y + 90))
+        mouse = pygame.mouse.get_pos()
+        self.max_players_stepper.draw(self.screen, f["medium"], f["small"], mouse)
+        self.wolves_stepper.draw(self.screen, f["medium"], f["small"], mouse)
+        self.voyante_toggle.draw(self.screen, f["small"], mouse)
+        self.sorciere_toggle.draw(self.screen, f["small"], mouse)
+        self.config_launch_btn.draw(self.screen, f["medium"], mouse)
+        self.back_btn.draw(self.screen, f["small"], mouse)
+
+    def draw_solo(self):
+        f = self.fonts()
+        panel = self.solo_layout()
+        draw_glass_panel(self.screen, panel)
+        draw_text(self.screen, "MODE SOLO", f["big"], WHITE, center=(panel.centerx, panel.y + 70))
+        draw_text(self.screen, "Tu joues contre des IA sur la même machine", f["small"], CYAN, center=(panel.centerx, panel.y + 120))
+        self.solo_players_stepper.draw(self.screen, f["medium"], f["small"], pygame.mouse.get_pos())
+        self.solo_launch_btn.draw(self.screen, f["medium"], pygame.mouse.get_pos())
+        self.back_btn.draw(self.screen, f["medium"], pygame.mouse.get_pos())
 
     def draw_join(self):
         f = self.fonts()
         panel = self.join_layout()
         draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "Serveurs disponibles", f["big"], WHITE, center=(panel.centerx, panel.y + 50))
-
+        draw_text(self.screen, "Serveurs disponibles", f["big"], WHITE, center=(panel.centerx, panel.y + 46))
         self.row_rects = []
-        y = panel.y + 110
+        y = panel.y + 100
         servers = self.discovery.get_servers()
-
         if not servers:
             draw_text(self.screen, "Aucun serveur trouvé.", f["medium"], WHITE, center=panel.center)
         else:
             self.selected_index = max(0, min(self.selected_index, len(servers) - 1))
             for i, server in enumerate(servers):
-                rect = pygame.Rect(panel.x + 30, y, panel.width - 60, 58)
+                rect = pygame.Rect(panel.x + 24, y, panel.width - 48, 74)
                 color = (80, 52, 100) if i == self.selected_index else (36, 28, 56)
                 pygame.draw.rect(self.screen, color, rect, border_radius=14)
                 pygame.draw.rect(self.screen, BUTTON_BORDER, rect, 1, border_radius=14)
                 draw_text(self.screen, server["name"], f["medium"], WHITE, topleft=(rect.x + 18, rect.y + 8))
-                draw_text(
-                    self.screen,
-                    f"{server['players']}/{server['max_players']} joueurs - {server['host']}",
-                    f["small"],
-                    CYAN,
-                    topleft=(rect.x + 18, rect.y + 30)
-                )
+                draw_text(self.screen, f"{server['players']}/{server['max_players']} joueurs - {server['host']}", f["small"], CYAN, topleft=(rect.x + 18, rect.y + 34))
+                draw_text(self.screen, f"Rôles : {server.get('roles', 'non précisés')}", f["small"], WHITE, topleft=(rect.x + 18, rect.y + 54))
                 self.row_rects.append((i, rect))
-                y += 68
-
+                y += 84
         self.back_btn.draw(self.screen, f["small"], pygame.mouse.get_pos())
 
-    def handle_menu_event(self, event):
+    def handle_main_event(self, event):
         self.input_name.handle_event(event)
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.create_btn.is_clicked(event.pos):
-                self.create_server()
-            elif self.join_btn.is_clicked(event.pos):
-                self.state = "join"
-                self.selected_index = 0
+            if self.main_solo_btn.is_clicked(event.pos):
+                self.state = "solo"
+            elif self.main_online_btn.is_clicked(event.pos):
+                self.state = "online"
             elif self.quit_btn.is_clicked(event.pos):
                 self.running = False
-        elif event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-            self.create_server()
+
+    def handle_online_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.online_create_btn.is_clicked(event.pos):
+                self.state = "config"
+            elif self.online_join_btn.is_clicked(event.pos):
+                self.state = "join"
+                self.selected_index = 0
+            elif self.back_btn.is_clicked(event.pos):
+                self.reset_menu_state()
+
+    def handle_config_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            self.max_players_stepper.handle_click(event.pos)
+            self.wolves_stepper.handle_click(event.pos)
+            self.voyante_toggle.handle_click(event.pos)
+            self.sorciere_toggle.handle_click(event.pos)
+            if self.config_launch_btn.is_clicked(event.pos):
+                self.create_server()
+            elif self.back_btn.is_clicked(event.pos):
+                self.state = "online"
+
+    def handle_solo_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            self.solo_players_stepper.handle_click(event.pos)
+            if self.solo_launch_btn.is_clicked(event.pos):
+                self.launch_solo_game()
+            elif self.back_btn.is_clicked(event.pos):
+                self.reset_menu_state()
 
     def handle_join_event(self, event):
         servers = self.discovery.get_servers()
-
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.back_btn.is_clicked(event.pos):
-                self.reset_menu_state()
+                self.state = "online"
                 return
-
             for i, rect in self.row_rects:
                 if rect.collidepoint(event.pos):
                     self.selected_index = i
                     self.join_selected_server()
                     return
-
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
-                self.state = "menu"
+                self.state = "online"
             elif event.key == pygame.K_DOWN and servers:
                 self.selected_index = min(self.selected_index + 1, len(servers) - 1)
             elif event.key == pygame.K_UP and servers:
@@ -302,33 +466,37 @@ class Launcher:
         while self.running:
             self.clock.tick(60)
             draw_vertical_gradient(self.screen, BG_TOP, BG_BOTTOM)
-
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif event.type == pygame.VIDEORESIZE:
-                    self.screen = pygame.display.set_mode(
-                        (max(MIN_W, event.w), max(MIN_H, event.h)),
-                        pygame.RESIZABLE
-                    )
-                elif self.state == "menu":
-                    self.handle_menu_event(event)
+                    self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
+                elif self.state == "main":
+                    self.handle_main_event(event)
+                elif self.state == "online":
+                    self.handle_online_event(event)
+                elif self.state == "config":
+                    self.handle_config_event(event)
+                elif self.state == "solo":
+                    self.handle_solo_event(event)
                 else:
                     self.handle_join_event(event)
-
-            if self.state == "menu":
-                self.draw_menu()
+            if self.state == "main":
+                self.draw_main()
+            elif self.state == "online":
+                self.draw_online()
+            elif self.state == "config":
+                self.draw_config()
+            elif self.state == "solo":
+                self.draw_solo()
             else:
                 self.draw_join()
-
             pygame.display.flip()
-
         if self.hosted_server is not None:
             try:
                 self.hosted_server.shutdown()
             except Exception:
                 pass
-
         self.discovery.stop()
         pygame.quit()
 
