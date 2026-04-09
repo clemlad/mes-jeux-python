@@ -186,6 +186,7 @@ class WerewolfOnlineGame:
         self.max_players = 12
         self.role_config = {}
         self.chat_history = []
+        self.chat_scroll = 0
         self.start_btn = Button("LANCER LA PARTIE", (90, 120, 80), (110, 145, 95))
         self.vote_btn = Button("VALIDER L'ACTION", (55, 85, 125), (75, 105, 155))
         self.sync_btn = Button("SYNCHRONISER", (70, 70, 110), (90, 90, 140))
@@ -248,7 +249,10 @@ class WerewolfOnlineGame:
                 self.seer_result = msg.get("seer_result")
                 self.max_players = msg.get("max_players", self.max_players)
                 self.role_config = msg.get("role_config", self.role_config)
+                old_len = len(self.chat_history)
                 self.chat_history = msg.get("chat_history", self.chat_history)
+                if len(self.chat_history) > old_len:
+                    self.chat_scroll = 0
                 if self.selected_target is not None and all(p["id"] != self.selected_target or not p["alive"] for p in self.players):
                     self.selected_target = None
             elif msg_type == "error":
@@ -359,8 +363,21 @@ class WerewolfOnlineGame:
         f = self.fonts()
         draw_glass_panel(self.screen, self.chat_rect, radius=22)
         draw_text(self.screen, "Chat", f["big"], WHITE, topleft=(self.chat_rect.x + 18, self.chat_rect.y + 14))
-        y = self.chat_rect.y + 62
-        visible = self.chat_history[-12:]
+
+        visible_top = self.chat_rect.y + 62
+        visible_bottom = self.chat_rect.bottom - 70
+        line_height = 48
+        max_visible = max(1, (visible_bottom - visible_top) // line_height)
+
+        total_messages = len(self.chat_history)
+        max_scroll = max(0, total_messages - max_visible)
+        self.chat_scroll = max(0, min(self.chat_scroll, max_scroll))
+
+        start_index = max(0, total_messages - max_visible - self.chat_scroll)
+        end_index = start_index + max_visible
+        visible = self.chat_history[start_index:end_index]
+
+        y = visible_top
         for entry in visible:
             color = GOLD if entry.get("system") else CYAN
             prefix = "[Système]" if entry.get("system") else entry.get("author", "?")
@@ -368,6 +385,18 @@ class WerewolfOnlineGame:
             y += 20
             draw_text(self.screen, entry.get("message", ""), f["small"], WHITE, topleft=(self.chat_rect.x + 26, y))
             y += 28
+
+        if total_messages > max_visible:
+            bar_x = self.chat_rect.right - 12
+            bar_y = visible_top
+            bar_h = visible_bottom - visible_top
+            pygame.draw.rect(self.screen, (40, 40, 70), (bar_x, bar_y, 6, bar_h), border_radius=3)
+
+            thumb_h = max(30, int(bar_h * (max_visible / total_messages)))
+            scroll_ratio = 0 if max_scroll == 0 else self.chat_scroll / max_scroll
+            thumb_y = bar_y + int((bar_h - thumb_h) * scroll_ratio)
+            pygame.draw.rect(self.screen, CYAN, (bar_x, thumb_y, 6, thumb_h), border_radius=3)
+
         self.chat_input.draw(self.screen, f["small"])
         self.chat_send_btn.draw(self.screen, f["small"], pygame.mouse.get_pos(), enabled=True)
 
@@ -387,6 +416,14 @@ class WerewolfOnlineGame:
         draw_text(self.screen, "Clique sur un joueur vivant pour le cibler.", f["small"], WHITE, center=self.bottom_rect.center)
 
     def handle_event(self, event):
+        if event.type == pygame.MOUSEWHEEL:
+            mouse_x, mouse_y = pygame.mouse.get_pos()
+            if self.chat_rect.collidepoint((mouse_x, mouse_y)):
+                if event.y > 0:
+                    self.chat_scroll = min(self.chat_scroll + 1, max(0, len(self.chat_history) - 1))
+                elif event.y < 0:
+                    self.chat_scroll = max(self.chat_scroll - 1, 0)
+            return
         if event.type == pygame.VIDEORESIZE:
             self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
             self.compute_layout()
