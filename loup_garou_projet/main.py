@@ -1,3 +1,4 @@
+
 import threading
 import time
 import pygame
@@ -6,13 +7,15 @@ from loup_garou_online import WerewolfOnlineGame
 from loup_garou_solo import WerewolfSoloGame
 from loup_server import WerewolfServer
 from server_discovery import ServerDiscovery
+from loup_shared import ROLE_DEFS, CONFIGURABLE_ROLES, normalize_role_config, role_config_label
 
-BASE_W, BASE_H = 1100, 760
-MIN_W, MIN_H = 900, 680
+BASE_W, BASE_H = 1320, 860
+MIN_W, MIN_H = 980, 700
 BG_TOP = (18, 16, 36)
 BG_BOTTOM = (56, 32, 70)
 WHITE = (240, 240, 245)
 CYAN = (135, 205, 235)
+GOLD = (220, 190, 80)
 PANEL_FILL = (12, 10, 26, 220)
 PANEL_BORDER = (120, 110, 160, 110)
 BUTTON_BORDER = (200, 190, 230)
@@ -71,9 +74,7 @@ class InputBox:
         elif event.type == pygame.KEYDOWN and self.active:
             if event.key == pygame.K_BACKSPACE:
                 self.text = self.text[:-1]
-            elif event.key == pygame.K_RETURN:
-                pass
-            elif len(self.text) < max_len and event.unicode.isprintable():
+            elif event.key != pygame.K_RETURN and len(self.text) < max_len and event.unicode.isprintable():
                 self.text += event.unicode
 
 
@@ -111,32 +112,6 @@ class Stepper:
         return False
 
 
-class Toggle:
-    def __init__(self, label, enabled=True):
-        self.label = label
-        self.enabled = enabled
-        self.rect = pygame.Rect(0, 0, 0, 0)
-
-    def set_rect(self, rect):
-        self.rect = pygame.Rect(rect)
-
-    def draw(self, surface, font, mouse_pos):
-        hovered = self.rect.collidepoint(mouse_pos)
-        base = (60, 102, 82) if self.enabled else (78, 44, 58)
-        hover = (80, 128, 104) if self.enabled else (100, 62, 78)
-        pygame.draw.rect(surface, hover if hovered else base, self.rect, border_radius=12)
-        pygame.draw.rect(surface, BUTTON_BORDER, self.rect, 2, border_radius=12)
-        text = f"{self.label} : {'Oui' if self.enabled else 'Non'}"
-        img = font.render(text, True, WHITE)
-        surface.blit(img, img.get_rect(center=self.rect.center))
-
-    def handle_click(self, pos):
-        if self.rect.collidepoint(pos):
-            self.enabled = not self.enabled
-            return True
-        return False
-
-
 def draw_vertical_gradient(surface, top_color, bottom_color):
     width, height = surface.get_size()
     for y in range(height):
@@ -152,6 +127,22 @@ def draw_glass_panel(surface, rect, radius=24):
     surface.blit(panel, rect.topleft)
 
 
+def wrap_text(text, font, width):
+    words = text.split()
+    if not words:
+        return [""]
+    lines, current = [], words[0]
+    for word in words[1:]:
+        test = current + " " + word
+        if font.size(test)[0] <= width:
+            current = test
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
 def draw_text(surface, text, font, color, center=None, topleft=None):
     img = font.render(text, True, color)
     rect = img.get_rect()
@@ -161,6 +152,45 @@ def draw_text(surface, text, font, color, center=None, topleft=None):
         rect.topleft = topleft
     surface.blit(img, rect)
     return rect
+
+
+class RoleRow:
+    def __init__(self, role_name, value):
+        self.role_name = role_name
+        self.value = value
+        self.rect = pygame.Rect(0, 0, 0, 0)
+        self.minus_btn = Button("-", RED, RED_H)
+        self.plus_btn = Button("+", GREEN, GREEN_H)
+
+    def set_rect(self, rect):
+        self.rect = pygame.Rect(rect)
+        self.minus_btn.set_rect((self.rect.right - 96, self.rect.y + 12, 36, self.rect.height - 24))
+        self.plus_btn.set_rect((self.rect.right - 48, self.rect.y + 12, 36, self.rect.height - 24))
+
+    def handle_click(self, pos):
+        max_count = ROLE_DEFS[self.role_name]["max_count"]
+        min_count = 1 if self.role_name == "Loup-garou" else 0
+        if self.minus_btn.is_clicked(pos):
+            self.value = max(min_count, self.value - 1)
+            return True
+        if self.plus_btn.is_clicked(pos):
+            self.value = min(max_count, self.value + 1)
+            return True
+        return self.rect.collidepoint(pos)
+
+    def draw(self, surface, fonts, mouse_pos, selected=False):
+        base = (52, 38, 74) if not selected else (82, 60, 112)
+        pygame.draw.rect(surface, base, self.rect, border_radius=14)
+        pygame.draw.rect(surface, BUTTON_BORDER, self.rect, 1, border_radius=14)
+        camp_color = CYAN if "Village" in ROLE_DEFS[self.role_name]["camp"] else GOLD
+        draw_text(surface, self.role_name, fonts["medium"], WHITE, topleft=(self.rect.x + 14, self.rect.y + 8))
+        draw_text(surface, ROLE_DEFS[self.role_name]["camp"], fonts["small"], camp_color, topleft=(self.rect.x + 14, self.rect.y + 34))
+        value_rect = pygame.Rect(self.rect.right - 150, self.rect.y + 12, 48, self.rect.height - 24)
+        pygame.draw.rect(surface, (26, 20, 46), value_rect, border_radius=10)
+        pygame.draw.rect(surface, BUTTON_BORDER, value_rect, 2, border_radius=10)
+        draw_text(surface, str(self.value), fonts["medium"], WHITE, center=value_rect.center)
+        self.minus_btn.draw(surface, fonts["small"], mouse_pos)
+        self.plus_btn.draw(surface, fonts["small"], mouse_pos)
 
 
 class Launcher:
@@ -176,7 +206,6 @@ class Launcher:
         self.main_solo_btn = Button("MODE SOLO", PURPLE, PURPLE_H)
         self.main_online_btn = Button("MODE EN LIGNE", BLUE, BLUE_H)
         self.quit_btn = Button("QUITTER", RED, RED_H)
-
         self.online_create_btn = Button("CRÉER UN SERVEUR", GREEN, GREEN_H)
         self.online_join_btn = Button("REJOINDRE UN SERVEUR", BLUE, BLUE_H)
         self.config_launch_btn = Button("LANCER LE SERVEUR", GREEN, GREEN_H)
@@ -184,15 +213,16 @@ class Launcher:
         self.back_btn = Button("RETOUR", RED, RED_H)
 
         self.max_players_stepper = Stepper("Joueurs max dans la room", 8, 4, 12)
-        self.wolves_stepper = Stepper("Nombre de loups", 1, 1, 3)
-        self.voyante_toggle = Toggle("Voyante", True)
-        self.sorciere_toggle = Toggle("Sorcière", True)
         self.solo_players_stepper = Stepper("Nombre total de joueurs", 6, 4, 12)
 
+        defaults = normalize_role_config()
+        self.role_rows = {name: RoleRow(name, defaults.get(name, 0)) for name in CONFIGURABLE_ROLES}
+        self.selected_role = CONFIGURABLE_ROLES[0]
+        self.role_scroll = 0
         self.discovery = ServerDiscovery()
         self.discovery.start()
 
-        self.message = "Choisis ton nom, puis solo ou en ligne."
+        self.message = "Choisis ton pseudo, puis solo ou en ligne."
         self.hosted_server = None
         self.host_thread = None
         self.selected_index = 0
@@ -202,9 +232,9 @@ class Launcher:
         w, h = self.screen.get_size()
         scale = min(w / BASE_W, h / BASE_H)
         return {
-            "small": pygame.font.SysFont("arial", max(18, int(22 * scale))),
-            "medium": pygame.font.SysFont("arial", max(24, int(30 * scale))),
-            "big": pygame.font.SysFont("arial", max(36, int(52 * scale))),
+            "small": pygame.font.SysFont("arial", max(16, int(19 * scale))),
+            "medium": pygame.font.SysFont("arial", max(24, int(28 * scale))),
+            "big": pygame.font.SysFont("arial", max(34, int(48 * scale))),
         }
 
     def valid_name(self):
@@ -212,11 +242,7 @@ class Launcher:
         return name[:20] if name else "Joueur"
 
     def role_config(self):
-        return {
-            "Loup-garou": self.wolves_stepper.value,
-            "Voyante": 1 if self.voyante_toggle.enabled else 0,
-            "Sorciere": 1 if self.sorciere_toggle.enabled else 0,
-        }
+        return {name: row.value for name, row in self.role_rows.items()}
 
     def reset_menu_state(self):
         self.state = "main"
@@ -307,14 +333,14 @@ class Launcher:
 
     def config_layout(self):
         w, h = self.screen.get_size()
-        panel = pygame.Rect(w // 2 - 360, h // 2 - 250, 720, 500)
-        self.max_players_stepper.set_layout(panel.x + 110, panel.y + 120, 500)
-        self.wolves_stepper.set_layout(panel.x + 110, panel.y + 210, 500)
-        self.voyante_toggle.set_rect((panel.x + 110, panel.y + 300, 240, 46))
-        self.sorciere_toggle.set_rect((panel.x + 370, panel.y + 300, 240, 46))
-        self.config_launch_btn.set_rect((panel.x + 110, panel.y + 386, 500, 50))
-        self.back_btn.set_rect((panel.x + 110, panel.y + 446, 500, 38))
-        return panel
+        panel = pygame.Rect(42, 42, w - 84, h - 84)
+        top_left = pygame.Rect(panel.x + 26, panel.y + 90, 360, 110)
+        role_list = pygame.Rect(panel.x + 26, panel.y + 220, 460, panel.height - 300)
+        desc_rect = pygame.Rect(role_list.right + 24, panel.y + 90, panel.width - role_list.width - 74, panel.height - 170)
+        self.max_players_stepper.set_layout(top_left.x + 6, top_left.y + 48, top_left.width - 12)
+        self.config_launch_btn.set_rect((desc_rect.x, panel.bottom - 58, 320, 42))
+        self.back_btn.set_rect((desc_rect.right - 180, panel.bottom - 58, 180, 42))
+        return panel, role_list, desc_rect
 
     def join_layout(self):
         w, h = self.screen.get_size()
@@ -356,17 +382,52 @@ class Launcher:
 
     def draw_config(self):
         f = self.fonts()
-        panel = self.config_layout()
+        panel, role_list, desc_rect = self.config_layout()
         draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "PANNEAU DE CONTRÔLE DU SERVEUR", f["big"], WHITE, center=(panel.centerx, panel.y + 60))
-        draw_text(self.screen, "Définis la taille de la room et les rôles de la partie", f["small"], CYAN, center=(panel.centerx, panel.y + 90))
-        mouse = pygame.mouse.get_pos()
-        self.max_players_stepper.draw(self.screen, f["medium"], f["small"], mouse)
-        self.wolves_stepper.draw(self.screen, f["medium"], f["small"], mouse)
-        self.voyante_toggle.draw(self.screen, f["small"], mouse)
-        self.sorciere_toggle.draw(self.screen, f["small"], mouse)
-        self.config_launch_btn.draw(self.screen, f["medium"], mouse)
-        self.back_btn.draw(self.screen, f["small"], mouse)
+        draw_text(self.screen, "PANNEAU DE CONTRÔLE DU SERVEUR", f["big"], WHITE, center=(panel.centerx, panel.y + 42))
+        draw_text(self.screen, "Choisis les rôles activés et découvre leur description", f["small"], CYAN, center=(panel.centerx, panel.y + 72))
+        draw_glass_panel(self.screen, pygame.Rect(role_list.x, role_list.y, role_list.width, role_list.height), 20)
+        draw_glass_panel(self.screen, pygame.Rect(desc_rect.x, desc_rect.y, desc_rect.width, desc_rect.height), 20)
+        self.max_players_stepper.draw(self.screen, f["medium"], f["small"], pygame.mouse.get_pos())
+
+        visible_count = max(1, role_list.height // 74)
+        roles = CONFIGURABLE_ROLES
+        max_scroll = max(0, len(roles) - visible_count)
+        self.role_scroll = max(0, min(self.role_scroll, max_scroll))
+        start = self.role_scroll
+        visible_roles = roles[start:start + visible_count]
+        y = role_list.y + 12
+        for role_name in visible_roles:
+            row = self.role_rows[role_name]
+            row.set_rect((role_list.x + 12, y, role_list.width - 24, 62))
+            row.draw(self.screen, f, pygame.mouse.get_pos(), selected=(role_name == self.selected_role))
+            y += 72
+
+        if len(roles) > visible_count:
+            bar_x = role_list.right - 10
+            bar_y = role_list.y + 12
+            bar_h = role_list.height - 24
+            pygame.draw.rect(self.screen, (40, 40, 70), (bar_x, bar_y, 6, bar_h), border_radius=3)
+            thumb_h = max(30, int(bar_h * (visible_count / len(roles))))
+            thumb_y = bar_y + int((bar_h - thumb_h) * (self.role_scroll / max_scroll if max_scroll else 0))
+            pygame.draw.rect(self.screen, CYAN, (bar_x, thumb_y, 6, thumb_h), border_radius=3)
+
+        role = ROLE_DEFS[self.selected_role]
+        draw_text(self.screen, self.selected_role, f["big"], WHITE, topleft=(desc_rect.x + 20, desc_rect.y + 18))
+        draw_text(self.screen, f"Camp : {role['camp']} | Aura : {role['aura']}", f["small"], GOLD, topleft=(desc_rect.x + 20, desc_rect.y + 60))
+        y = desc_rect.y + 100
+        for line in wrap_text(role["description"], f["small"], desc_rect.width - 40):
+            draw_text(self.screen, line, f["small"], WHITE, topleft=(desc_rect.x + 20, y))
+            y += 24
+
+        y += 14
+        summary = role_config_label(self.role_config())
+        for line in wrap_text("Composition actuelle : " + summary, f["small"], desc_rect.width - 40):
+            draw_text(self.screen, line, f["small"], CYAN, topleft=(desc_rect.x + 20, y))
+            y += 24
+
+        self.config_launch_btn.draw(self.screen, f["medium"], pygame.mouse.get_pos())
+        self.back_btn.draw(self.screen, f["medium"], pygame.mouse.get_pos())
 
     def draw_solo(self):
         f = self.fonts()
@@ -391,15 +452,15 @@ class Launcher:
         else:
             self.selected_index = max(0, min(self.selected_index, len(servers) - 1))
             for i, server in enumerate(servers):
-                rect = pygame.Rect(panel.x + 24, y, panel.width - 48, 74)
+                rect = pygame.Rect(panel.x + 24, y, panel.width - 48, 78)
                 color = (80, 52, 100) if i == self.selected_index else (36, 28, 56)
                 pygame.draw.rect(self.screen, color, rect, border_radius=14)
                 pygame.draw.rect(self.screen, BUTTON_BORDER, rect, 1, border_radius=14)
                 draw_text(self.screen, server["name"], f["medium"], WHITE, topleft=(rect.x + 18, rect.y + 8))
-                draw_text(self.screen, f"{server['players']}/{server['max_players']} joueurs - {server['host']}", f["small"], CYAN, topleft=(rect.x + 18, rect.y + 34))
-                draw_text(self.screen, f"Rôles : {server.get('roles', 'non précisés')}", f["small"], WHITE, topleft=(rect.x + 18, rect.y + 54))
+                draw_text(self.screen, f"{server['players']}/{server['max_players']} joueurs - {server['host']}", f["small"], CYAN, topleft=(rect.x + 18, rect.y + 36))
+                draw_text(self.screen, f"Rôles : {server.get('roles', 'non précisés')}", f["small"], WHITE, topleft=(rect.x + 18, rect.y + 56))
                 self.row_rects.append((i, rect))
-                y += 84
+                y += 88
         self.back_btn.draw(self.screen, f["small"], pygame.mouse.get_pos())
 
     def handle_main_event(self, event):
@@ -423,11 +484,23 @@ class Launcher:
                 self.reset_menu_state()
 
     def handle_config_event(self, event):
+        panel, role_list, desc_rect = self.config_layout()
+        if event.type == pygame.MOUSEWHEEL:
+            mouse_pos = pygame.mouse.get_pos()
+            if role_list.collidepoint(mouse_pos):
+                if event.y < 0:
+                    self.role_scroll += 1
+                elif event.y > 0:
+                    self.role_scroll -= 1
+            return
         if event.type == pygame.MOUSEBUTTONDOWN:
             self.max_players_stepper.handle_click(event.pos)
-            self.wolves_stepper.handle_click(event.pos)
-            self.voyante_toggle.handle_click(event.pos)
-            self.sorciere_toggle.handle_click(event.pos)
+            for role_name in CONFIGURABLE_ROLES:
+                row = self.role_rows[role_name]
+                if row.rect.collidepoint(event.pos) or row.minus_btn.is_clicked(event.pos) or row.plus_btn.is_clicked(event.pos):
+                    row.handle_click(event.pos)
+                    self.selected_role = role_name
+                    break
             if self.config_launch_btn.is_clicked(event.pos):
                 self.create_server()
             elif self.back_btn.is_clicked(event.pos):

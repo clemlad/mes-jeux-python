@@ -1,10 +1,11 @@
+
 import random
 from collections import Counter
 import pygame
 
-from loup_shared import MAX_PLAYERS, MIN_PLAYERS, build_roles, check_winner, serialize_players_for
+from loup_shared import MAX_PLAYERS, MIN_PLAYERS, build_roles, check_winner, get_role_def, serialize_players_for, team_of
 
-BASE_W, BASE_H = 1240, 820
+BASE_W, BASE_H = 1320, 860
 MIN_W, MIN_H = 980, 700
 FPS = 60
 BG_TOP = (18, 16, 36)
@@ -57,6 +58,22 @@ def draw_glass_panel(surface, rect, radius=20):
     surface.blit(panel, rect.topleft)
 
 
+def wrap_text(text, font, width):
+    words = text.split()
+    if not words:
+        return [""]
+    lines, current = [], words[0]
+    for word in words[1:]:
+        test = current + " " + word
+        if font.size(test)[0] <= width:
+            current = test
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
 def draw_text(surface, text, font, color, center=None, topleft=None):
     img = font.render(text, True, color)
     rect = img.get_rect()
@@ -87,11 +104,9 @@ class WerewolfSoloGame:
         self.selected_target = None
         self.winner = None
         self.last_deaths = []
-        self.night_target_name = None
         self.seer_result = None
         self.witch_heal_used = False
         self.witch_poison_used = False
-        self.pending_night = {}
         self.start_btn = Button("NOUVELLE PARTIE", (90, 120, 80), (110, 145, 95))
         self.vote_btn = Button("VALIDER", (55, 85, 125), (75, 105, 155))
         self.skip_btn = Button("PASSER", (120, 85, 60), (150, 105, 75))
@@ -112,13 +127,12 @@ class WerewolfSoloGame:
     def compute_layout(self):
         w, h = self.screen.get_size()
         self.top_rect = pygame.Rect(20, 20, w - 40, 90)
-        self.left_rect = pygame.Rect(20, 130, int(w * 0.42), h - 200)
+        self.left_rect = pygame.Rect(20, 130, int(w * 0.40), h - 200)
         self.right_rect = pygame.Rect(self.left_rect.right + 20, 130, w - self.left_rect.width - 60, h - 200)
         self.bottom_rect = pygame.Rect(20, h - 60, w - 40, 40)
-        btn_w = min(240, self.right_rect.width - 40)
-        self.start_btn.set_rect((self.right_rect.x + 20, self.right_rect.bottom - 60, btn_w, 44))
-        self.vote_btn.set_rect((self.right_rect.x + 20, self.right_rect.bottom - 60, btn_w, 44))
-        self.skip_btn.set_rect((self.right_rect.x + 20 + btn_w + 14, self.right_rect.bottom - 60, max(140, self.right_rect.width - btn_w - 54), 44))
+        self.start_btn.set_rect((self.right_rect.x + 20, self.right_rect.bottom - 56, self.right_rect.width - 40, 42))
+        self.vote_btn.set_rect((self.right_rect.x + 20, self.right_rect.bottom - 108, self.right_rect.width - 40, 42))
+        self.skip_btn.set_rect((self.right_rect.x + 20, self.right_rect.bottom - 56, self.right_rect.width - 40, 42))
 
     def setup_game(self):
         roles = build_roles(self.total_players, self.role_config)
@@ -131,20 +145,22 @@ class WerewolfSoloGame:
                 "role": roles[i],
                 "alive": True,
                 "revealed_role": None,
+                "lover_ids": [],
+                "mentor_id": None,
+                "renard_active": True,
+                "doused": False,
+                "charmed_by": None,
             })
         self.phase = "night"
         self.day_count = 1
         self.message = "La nuit commence."
-        self.action_hint = ""
+        self.action_hint = "Cette version solo gère les nouveaux rôles en version simplifiée."
         self.selected_target = None
         self.winner = None
         self.last_deaths = []
-        self.night_target_name = None
         self.seer_result = None
         self.witch_heal_used = False
         self.witch_poison_used = False
-        self.pending_night = {"seer_done": False, "witch_done": False}
-        self.run_ai_night_until_player()
 
     def current_player(self):
         return self.players[self.player_id]
@@ -156,90 +172,60 @@ class WerewolfSoloGame:
         return [p["id"] for p in self.players if p["alive"]]
 
     def human_can_act(self):
-        if not self.current_player()["alive"] or self.winner:
-            return False
-        if self.phase == "day":
-            return True
-        if self.phase != "night":
-            return False
-        role = self.current_role()
-        if role == "Loup-garou":
-            return True
-        if role == "Voyante" and not self.pending_night.get("seer_done"):
-            return True
-        if role == "Sorciere" and not self.pending_night.get("witch_done"):
-            return True
-        return False
+        return self.current_player()["alive"] and not self.winner
 
     def random_target(self, exclude=None):
         choices = [pid for pid in self.alive_ids() if pid != exclude]
         return random.choice(choices) if choices else None
 
-    def resolve_night(self):
-        deaths = set()
-        if self.pending_night.get("wolf_target") is not None and not self.pending_night.get("saved"):
-            deaths.add(self.pending_night["wolf_target"])
-        if self.pending_night.get("poison_target") is not None:
-            deaths.add(self.pending_night["poison_target"])
-        for pid in deaths:
-            if self.players[pid]["alive"]:
-                self.players[pid]["alive"] = False
-                self.players[pid]["revealed_role"] = self.players[pid]["role"]
-        self.last_deaths = [self.players[pid]["name"] for pid in deaths]
+    def kill_player(self, pid):
+        if pid is None or not self.players[pid]["alive"]:
+            return
+        self.players[pid]["alive"] = False
+        self.players[pid]["revealed_role"] = self.players[pid]["role"]
+        self.last_deaths.append(self.players[pid]["name"])
+        for lover_id in self.players[pid].get("lover_ids", []):
+            if self.players[lover_id]["alive"]:
+                self.kill_player(lover_id)
+        for child in self.players:
+            if child["alive"] and child["role"] == "Enfant sauvage" and child.get("mentor_id") == pid:
+                child["role"] = "Loup-garou"
+
+    def ai_night(self):
+        wolves = [p for p in self.players if p["alive"] and team_of(p) == "Loups" and p["id"] != self.player_id]
+        if wolves:
+            target = self.random_target(exclude=wolves[0]["id"])
+            if target is not None and self.players[target]["role"] == "Villageois maudit":
+                self.players[target]["role"] = "Loup-garou"
+            elif target is not None:
+                self.kill_player(target)
+        for p in self.players:
+            if not p["alive"] or p["id"] == self.player_id:
+                continue
+            if p["role"] == "Sirène":
+                for _ in range(3):
+                    t = self.random_target(exclude=p["id"])
+                    if t is not None:
+                        self.players[t]["charmed_by"] = p["id"]
+            elif p["role"] == "Pyroman":
+                t = self.random_target(exclude=p["id"])
+                if t is not None:
+                    self.players[t]["doused"] = True
+            elif p["role"] == "Cupidon" and self.day_count == 1:
+                a = self.random_target(exclude=p["id"])
+                b = self.random_target(exclude=p["id"])
+                if a is not None and b is not None and a != b:
+                    self.players[a]["lover_ids"] = [b]
+                    self.players[b]["lover_ids"] = [a]
+            elif p["role"] == "Enfant sauvage" and self.day_count == 1 and p["mentor_id"] is None:
+                p["mentor_id"] = self.random_target(exclude=p["id"])
         self.winner = check_winner(self.players)
-        if self.winner:
-            self.phase = "end"
-            self.message = f"Victoire du camp : {self.winner}."
-        else:
+        if not self.winner:
             self.phase = "day"
             self.message = "Jour : vote pour éliminer un joueur."
-            self.action_hint = "Clique sur un joueur vivant puis valide ton vote."
-
-    def run_ai_night_until_player(self):
-        if self.winner:
-            return
-        self.pending_night = {"seer_done": False, "witch_done": False}
-        wolves = [p for p in self.players if p["alive"] and p["role"] == "Loup-garou"]
-        if wolves:
-            votes = []
-            for wolf in wolves:
-                if wolf["id"] == self.player_id and wolf["alive"]:
-                    self.action_hint = "Tu es loup-garou : choisis une victime."
-                    return
-                votes.append(self.random_target(exclude=wolf["id"]))
-            votes = [v for v in votes if v is not None]
-            if votes:
-                self.pending_night["wolf_target"] = Counter(votes).most_common(1)[0][0]
-                self.night_target_name = self.players[self.pending_night["wolf_target"]]["name"]
-        seer = next((p for p in self.players if p["alive"] and p["role"] == "Voyante"), None)
-        if seer:
-            if seer["id"] == self.player_id:
-                self.action_hint = "Tu es voyante : choisis un joueur pour voir son rôle."
-                return
-            target = self.random_target(exclude=seer["id"])
-            self.pending_night["seer_done"] = True
-            if target is not None:
-                pass
-        witch = next((p for p in self.players if p["alive"] and p["role"] == "Sorciere"), None)
-        if witch:
-            if witch["id"] == self.player_id and not self.pending_night.get("witch_done"):
-                self.action_hint = "Tu es sorcière : tu peux sauver ou empoisonner."
-                return
-            if witch["id"] != self.player_id:
-                if self.pending_night.get("wolf_target") is not None and not self.witch_heal_used and random.random() < 0.35:
-                    self.pending_night["saved"] = True
-                    self.witch_heal_used = True
-                elif not self.witch_poison_used and random.random() < 0.2:
-                    target = self.random_target(exclude=witch["id"])
-                    if target is not None:
-                        self.pending_night["poison_target"] = target
-                        self.witch_poison_used = True
-                self.pending_night["witch_done"] = True
-        self.resolve_night()
+            self.action_hint = "Clique sur un joueur vivant puis valide."
 
     def run_ai_day(self):
-        if self.phase != "day" or self.winner:
-            return
         votes = {}
         for p in self.players:
             if not p["alive"] or p["id"] == self.player_id:
@@ -249,61 +235,55 @@ class WerewolfSoloGame:
                 votes[p["id"]] = target
         if self.selected_target is not None:
             votes[self.player_id] = self.selected_target
-        if len(votes) < len([p for p in self.players if p["alive"]]):
+        alive_count = len([p for p in self.players if p["alive"]])
+        if len(votes) < alive_count - 1:
             return
-        counts = {}
-        for target in votes.values():
-            counts[target] = counts.get(target, 0) + 1
+        counts = Counter(votes.values())
         chosen = max(counts.items(), key=lambda x: (x[1], -x[0]))[0]
-        self.players[chosen]["alive"] = False
-        self.players[chosen]["revealed_role"] = self.players[chosen]["role"]
-        self.last_deaths = [self.players[chosen]["name"]]
+        self.last_deaths = []
+        self.kill_player(chosen)
         self.winner = check_winner(self.players)
         if self.winner:
             self.phase = "end"
-            self.message = f"{self.players[chosen]['name']} a été éliminé. Victoire du camp : {self.winner}."
+            self.message = f"Victoire du camp : {self.winner}."
         else:
             self.phase = "night"
             self.day_count += 1
             self.message = f"{self.players[chosen]['name']} a été éliminé. La nuit tombe..."
             self.selected_target = None
-            self.run_ai_night_until_player()
+            self.ai_night()
 
     def apply_human_action(self):
-        role = self.current_role()
         if self.phase == "day":
             self.run_ai_day()
             return
-        if self.phase != "night" or self.selected_target is None:
-            return
-        if role == "Loup-garou":
-            self.pending_night["wolf_target"] = self.selected_target
-        elif role == "Voyante":
-            self.pending_night["seer_done"] = True
-            self.seer_result = f"{self.players[self.selected_target]['name']} est {self.players[self.selected_target]['role']}."
-        elif role == "Sorciere":
-            self.pending_night["poison_target"] = self.selected_target
-            self.pending_night["witch_done"] = True
-            self.witch_poison_used = True
-        if role in ("Loup-garou", "Voyante"):
-            witch = next((p for p in self.players if p["alive"] and p["role"] == "Sorciere"), None)
-            if witch and witch["id"] != self.player_id and not self.pending_night.get("witch_done"):
-                if self.pending_night.get("wolf_target") is not None and not self.witch_heal_used and random.random() < 0.35:
-                    self.pending_night["saved"] = True
-                    self.witch_heal_used = True
-                self.pending_night["witch_done"] = True
-            self.resolve_night()
-        elif role == "Sorciere":
-            self.resolve_night()
-
-    def skip_or_save(self):
-        if self.current_role() != "Sorciere" or self.phase != "night":
-            return
-        if self.pending_night.get("wolf_target") is not None and not self.witch_heal_used:
-            self.pending_night["saved"] = True
-            self.witch_heal_used = True
-        self.pending_night["witch_done"] = True
-        self.resolve_night()
+        if self.phase == "night":
+            role = self.current_role()
+            if role == "Voyante" and self.selected_target is not None:
+                self.seer_result = f"{self.players[self.selected_target]['name']} est {self.players[self.selected_target]['role']}."
+            elif role in ("Loup-garou", "Infect Père des Loups") and self.selected_target is not None:
+                if self.players[self.selected_target]["role"] == "Villageois maudit":
+                    self.players[self.selected_target]["role"] = "Loup-garou"
+                else:
+                    self.kill_player(self.selected_target)
+            elif role == "Sorciere" and self.selected_target is not None and not self.witch_poison_used and self.day_count > 1:
+                self.kill_player(self.selected_target)
+                self.witch_poison_used = True
+            elif role == "Cupidon" and self.selected_target is not None:
+                target2 = self.random_target(exclude=self.selected_target)
+                if target2 is not None:
+                    self.players[self.selected_target]["lover_ids"] = [target2]
+                    self.players[target2]["lover_ids"] = [self.selected_target]
+            elif role == "Enfant sauvage" and self.selected_target is not None:
+                self.current_player()["mentor_id"] = self.selected_target
+            self.winner = check_winner(self.players)
+            if self.winner:
+                self.phase = "end"
+                self.message = f"Victoire du camp : {self.winner}."
+            else:
+                self.phase = "day"
+                self.message = "Jour : vote pour éliminer un joueur."
+                self.action_hint = "Clique sur un joueur vivant puis valide."
 
     def draw_player_list(self):
         f = self.fonts()
@@ -312,17 +292,17 @@ class WerewolfSoloGame:
         self.player_rects = []
         y = self.left_rect.y + 72
         for p in serialize_players_for(self.player_id, self.players, reveal_all=self.winner is not None):
-            rect = pygame.Rect(self.left_rect.x + 16, y, self.left_rect.width - 32, 48)
+            rect = pygame.Rect(self.left_rect.x + 16, y, self.left_rect.width - 32, 56)
             selected = p["id"] == self.selected_target
             base = (42, 30, 60) if not selected else (80, 52, 100)
             pygame.draw.rect(self.screen, base, rect, border_radius=12)
             pygame.draw.rect(self.screen, BUTTON_BORDER, rect, 1, border_radius=12)
             status = "vivant" if p["alive"] else "mort"
-            role = p.get("revealed_role") or p.get("role", "?") if (not p["alive"] or p["id"] == self.player_id or p.get("role") == "Loup-garou") else "?"
+            role = p.get("revealed_role") or p.get("role", "?") if (not p["alive"] or p["id"] == self.player_id or p.get("role") in ("Loup-garou", "Infect Père des Loups")) else "?"
             draw_text(self.screen, p["name"], f["medium"], WHITE, topleft=(rect.x + 14, rect.y + 8))
-            draw_text(self.screen, f"{status} - {role}", f["small"], CYAN if p["alive"] else RED, topleft=(rect.x + 14, rect.y + 25))
+            draw_text(self.screen, f"{status} - {role}", f["small"], CYAN if p["alive"] else RED, topleft=(rect.x + 14, rect.y + 30))
             self.player_rects.append((p["id"], rect))
-            y += 56
+            y += 64
 
     def draw_info(self):
         f = self.fonts()
@@ -330,37 +310,43 @@ class WerewolfSoloGame:
         draw_text(self.screen, "Mode solo", f["big"], WHITE, topleft=(self.right_rect.x + 18, self.right_rect.y + 14))
         phase_label = {"night": f"Nuit {self.day_count}", "day": f"Jour {self.day_count}", "end": "Fin de partie"}.get(self.phase, self.phase)
         draw_text(self.screen, phase_label, f["medium"], GOLD, topleft=(self.right_rect.x + 20, self.right_rect.y + 70))
-        draw_text(self.screen, f"Ton rôle : {self.current_role()}", f["medium"], CYAN, topleft=(self.right_rect.x + 20, self.right_rect.y + 110))
-        draw_text(self.screen, self.message, f["small"], WHITE, topleft=(self.right_rect.x + 20, self.right_rect.y + 150))
-        if self.action_hint:
-            draw_text(self.screen, self.action_hint, f["small"], GOLD, topleft=(self.right_rect.x + 20, self.right_rect.y + 180))
-        if self.seer_result:
-            draw_text(self.screen, self.seer_result, f["small"], GREEN, topleft=(self.right_rect.x + 20, self.right_rect.y + 210))
-        if self.last_deaths:
-            draw_text(self.screen, "Derniers éliminés : " + ", ".join(self.last_deaths), f["small"], RED, topleft=(self.right_rect.x + 20, self.right_rect.y + 240))
-        y = self.right_rect.y + 290
-        for line in [
-            f"Joueurs totaux : {self.total_players}",
-            "Les IA jouent automatiquement.",
-            "Tu peux refaire une partie à la fin.",
-        ]:
+        role = self.current_role()
+        draw_text(self.screen, f"Ton rôle : {role}", f["medium"], CYAN, topleft=(self.right_rect.x + 20, self.right_rect.y + 110))
+        role_def = get_role_def(role)
+        y = self.right_rect.y + 150
+        draw_text(self.screen, f"Camp : {role_def['camp']} | Aura : {role_def['aura']}", f["small"], WHITE, topleft=(self.right_rect.x + 20, y))
+        y += 28
+        for line in wrap_text(role_def["description"], f["small"], self.right_rect.width - 40):
             draw_text(self.screen, line, f["small"], WHITE, topleft=(self.right_rect.x + 20, y))
+            y += 22
+        y += 10
+        for line in wrap_text(self.message, f["small"], self.right_rect.width - 40):
+            draw_text(self.screen, line, f["small"], WHITE, topleft=(self.right_rect.x + 20, y))
+            y += 22
+        if self.action_hint:
+            for line in wrap_text(self.action_hint, f["small"], self.right_rect.width - 40):
+                draw_text(self.screen, line, f["small"], GOLD, topleft=(self.right_rect.x + 20, y))
+                y += 22
+        if self.seer_result:
+            draw_text(self.screen, self.seer_result, f["small"], GREEN, topleft=(self.right_rect.x + 20, y))
+            y += 28
+        if self.last_deaths:
+            draw_text(self.screen, "Derniers éliminés : " + ", ".join(self.last_deaths), f["small"], RED, topleft=(self.right_rect.x + 20, y))
             y += 28
         mouse = pygame.mouse.get_pos()
         if self.phase == "end":
             self.start_btn.draw(self.screen, f["small"], mouse, enabled=True)
         else:
             self.vote_btn.draw(self.screen, f["small"], mouse, enabled=self.human_can_act() and self.selected_target is not None)
-            if self.phase == "night" and self.current_role() == "Sorciere":
-                self.skip_btn.text = "SAUVER" if self.pending_night.get("wolf_target") is not None and not self.witch_heal_used else "PASSER"
-                self.skip_btn.draw(self.screen, f["small"], mouse, enabled=self.human_can_act())
+            self.skip_btn.text = "PASSER LA NUIT" if self.phase == "night" else "PASSER"
+            self.skip_btn.draw(self.screen, f["small"], mouse, enabled=self.human_can_act())
 
     def draw(self):
         draw_vertical_gradient(self.screen, BG_TOP, BG_BOTTOM)
         f = self.fonts()
         draw_glass_panel(self.screen, self.top_rect, radius=22)
         draw_text(self.screen, "LOUP-GAROU SOLO", f["title"], WHITE, center=(self.top_rect.centerx, self.top_rect.y + 32))
-        draw_text(self.screen, "Affronte des IA dans une partie locale", f["small"], CYAN, center=(self.top_rect.centerx, self.top_rect.y + 68))
+        draw_text(self.screen, "Version locale avec catalogue enrichi des rôles", f["small"], CYAN, center=(self.top_rect.centerx, self.top_rect.y + 68))
         self.draw_player_list()
         self.draw_info()
         draw_text(self.screen, "Clique sur un joueur vivant pour le cibler.", f["small"], WHITE, center=self.bottom_rect.center)
@@ -381,8 +367,8 @@ class WerewolfSoloGame:
             self.setup_game()
         elif self.vote_btn.is_clicked(event.pos):
             self.apply_human_action()
-        elif self.phase == "night" and self.current_role() == "Sorciere" and self.skip_btn.is_clicked(event.pos):
-            self.skip_or_save()
+        elif self.skip_btn.is_clicked(event.pos) and self.phase == "night":
+            self.ai_night()
 
     def run(self):
         while self.running:
