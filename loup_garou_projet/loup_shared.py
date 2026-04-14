@@ -2,7 +2,7 @@
 import random
 from collections import Counter
 
-MIN_PLAYERS = 4
+MIN_PLAYERS = 3
 MAX_PLAYERS = 12
 
 ROLE_DEFS = {
