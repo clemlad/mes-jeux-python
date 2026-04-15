@@ -15,6 +15,8 @@ from loup_shared import (
     normalize_role_config,
     role_config_label,
     serialize_players_for,
+    min_players_for_config,
+    role_config_error,
 )
 from server_discovery import ServerBroadcaster, get_local_ip
 
@@ -160,8 +162,25 @@ class WerewolfServer:
         if self.game_started or self.phase != "lobby":
             return {"type": "error", "message": "La configuration n'est modifiable qu'avant la partie."}
         self.role_config = normalize_role_config(msg.get("role_config", {}))
+        required = min_players_for_config(self.role_config)
+        if self.max_players < required:
+            self.max_players = required
         self.broadcaster.set_room_config(self.max_players, role_config_label(self.role_config))
         self.message = "Configuration des rôles mise à jour."
+        self.broadcast_snapshots()
+        return self.player_snapshot(player_id)
+
+    def update_max_players(self, player_id, msg):
+        if player_id != self.host_id:
+            return {"type": "error", "message": "Seul l'hôte peut modifier le nombre de joueurs."}
+        if self.game_started or self.phase != "lobby":
+            return {"type": "error", "message": "Le nombre de joueurs n'est modifiable qu'avant la partie."}
+        requested = int(msg.get("max_players", self.max_players))
+        requested = max(MIN_PLAYERS, min(MAX_PLAYERS, requested))
+        requested = max(requested, self.connected_player_count(), min_players_for_config(self.role_config))
+        self.max_players = requested
+        self.broadcaster.set_room_config(self.max_players, role_config_label(self.role_config))
+        self.message = f"Salon réglé sur {self.max_players} joueurs."
         self.broadcast_snapshots()
         return self.player_snapshot(player_id)
 
@@ -171,6 +190,11 @@ class WerewolfServer:
         active_players = [p for p in self.players if p.get("connected")]
         if len(active_players) < MIN_PLAYERS:
             return {"type": "error", "message": f"Il faut au moins {MIN_PLAYERS} joueurs."}
+        if len(active_players) != self.max_players:
+            return {"type": "error", "message": f"Il faut exactement {self.max_players} joueurs connectés pour lancer la partie."}
+        config_error = role_config_error(self.max_players, self.role_config)
+        if config_error:
+            return {"type": "error", "message": config_error}
         try:
             roles = build_roles(len(active_players), self.role_config)
         except ValueError as exc:
@@ -369,6 +393,8 @@ class WerewolfServer:
                             response = self.update_role_config(player_id, msg)
                         elif kind == "start_game":
                             response = self.start_game(player_id)
+                        elif kind == "update_max_players":
+                            response = self.update_max_players(player_id, msg)
                         elif kind == "night_action":
                             response = self.handle_night_action(player_id, msg)
                         elif kind == "vote_action":

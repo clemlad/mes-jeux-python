@@ -5,7 +5,7 @@ import pygame
 from loup_garou_online import WerewolfOnlineGame
 from loup_garou_solo import WerewolfSoloGame
 from loup_server import WerewolfServer
-from loup_shared import MIN_PLAYERS
+from loup_shared import MIN_PLAYERS, MAX_PLAYERS
 from server_discovery import ServerDiscovery
 
 BASE_W, BASE_H = 1100, 760
@@ -155,7 +155,6 @@ class Launcher:
         self.solo_launch_btn = Button("LANCER LE SOLO", GREEN, GREEN_H)
         self.back_btn = Button("RETOUR", RED, RED_H)
 
-        self.max_players_stepper = Stepper("Joueurs max dans la room", 8, MIN_PLAYERS, 12)
         self.solo_players_stepper = Stepper("Nombre total de joueurs", 6, MIN_PLAYERS, 12)
 
         self.discovery = ServerDiscovery()
@@ -238,7 +237,7 @@ class Launcher:
             self.host_thread = None
         self.hosted_server = WerewolfServer(
             host_name=self.valid_name(),
-            max_players=self.max_players_stepper.value,
+            max_players=MAX_PLAYERS,
             role_config=None,
         )
         self.host_thread = threading.Thread(target=self.hosted_server.serve_forever, daemon=True)
@@ -266,11 +265,10 @@ class Launcher:
 
     def online_layout(self):
         w, h = self.screen.get_size()
-        panel = pygame.Rect(w // 2 - 330, h // 2 - 230, 660, 460)
-        self.max_players_stepper.set_layout(panel.x + 120, panel.y + 150, 420)
-        self.online_create_btn.set_rect((panel.x + 120, panel.y + 230, 420, 54))
-        self.online_join_btn.set_rect((panel.x + 120, panel.y + 306, 420, 54))
-        self.back_btn.set_rect((panel.x + 120, panel.y + 382, 420, 46))
+        panel = pygame.Rect(w // 2 - 330, h // 2 - 220, 660, 440)
+        self.online_create_btn.set_rect((panel.x + 120, panel.y + 178, 420, 58))
+        self.online_join_btn.set_rect((panel.x + 120, panel.y + 258, 420, 58))
+        self.back_btn.set_rect((panel.x + 120, panel.y + 338, 420, 48))
         return panel
 
     def join_layout(self):
@@ -304,9 +302,9 @@ class Launcher:
         f = self.fonts()
         panel = self.online_layout()
         draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "MODE EN LIGNE", f["big"], WHITE, center=(panel.centerx, panel.y + 70))
-        draw_text(self.screen, "Le choix des rôles se fera dans le lobby du serveur.", f["small"], CYAN, center=(panel.centerx, panel.y + 112))
-        self.max_players_stepper.draw(self.screen, f["medium"], f["small"], pygame.mouse.get_pos())
+        draw_text(self.screen, "MODE EN LIGNE", f["big"], WHITE, center=(panel.centerx, panel.y + 68))
+        draw_text(self.screen, "Le nombre de joueurs et les rôles se règlent directement dans le lobby du serveur.", f["small"], CYAN, center=(panel.centerx, panel.y + 118))
+        draw_text(self.screen, "Crée simplement un salon ou rejoins-en un existant.", f["small"], WHITE, center=(panel.centerx, panel.y + 148))
         mouse = pygame.mouse.get_pos()
         self.online_create_btn.draw(self.screen, f["medium"], mouse)
         self.online_join_btn.draw(self.screen, f["medium"], mouse)
@@ -361,7 +359,6 @@ class Launcher:
 
     def handle_online_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
-            self.max_players_stepper.handle_click(event.pos)
             if self.online_create_btn.is_clicked(event.pos):
                 self.create_server()
             elif self.online_join_btn.is_clicked(event.pos):

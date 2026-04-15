@@ -3,7 +3,17 @@ import socket
 import threading
 import pygame
 
-from loup_shared import MIN_PLAYERS, ROLE_CATALOG, ROLES_ORDER, normalize_role_config, role_config_label
+from loup_shared import (
+    MIN_PLAYERS,
+    MAX_PLAYERS,
+    ROLE_CATALOG,
+    CLASSIC_ROLE_NAMES,
+    SPECIAL_ROLE_NAMES,
+    camp_balance,
+    min_players_for_config,
+    normalize_role_config,
+    role_config_error,
+)
 
 BASE_W, BASE_H = 1320, 860
 MIN_W, MIN_H = 1020, 700
@@ -20,6 +30,18 @@ PANEL_BORDER = (120, 110, 160, 110)
 BUTTON_BORDER = (200, 190, 230)
 PURPLE = (86, 66, 128)
 PURPLE_2 = (64, 46, 96)
+BLUE_BAR = (38, 103, 185)
+RED_BAR = (174, 18, 34)
+ROLE_WOLF = (132, 28, 44)
+ROLE_VILLAGE = (34, 96, 166)
+ROLE_NEUTRAL = (92, 56, 110)
+ROW_BG = (96, 72, 142)
+ROW_BG_SEL = (116, 88, 166)
+BTN_MINUS = (105, 94, 228)
+BTN_PLUS = (115, 104, 246)
+COUNT_BG = (18, 14, 34)
+PILL_BG = (6, 8, 18)
+PILL_ACTIVE = (31, 34, 78)
 
 
 class NetworkClient:
@@ -88,8 +110,8 @@ class Button:
         active_color = self.hover if enabled and self.rect.collidepoint(mouse_pos) else self.color
         pygame.draw.rect(surface, active_color, self.rect, border_radius=14)
         pygame.draw.rect(surface, BUTTON_BORDER, self.rect, 2, border_radius=14)
-        text_color = WHITE if enabled else (150, 150, 160)
-        img = font.render(self.text, True, text_color)
+        color = WHITE if enabled else (150, 150, 160)
+        img = font.render(self.text, True, color)
         surface.blit(img, img.get_rect(center=self.rect.center))
 
     def is_clicked(self, pos):
@@ -113,11 +135,10 @@ class InputBox:
         pygame.draw.rect(surface, CYAN if self.active else BUTTON_BORDER, self.rect, 2, border_radius=14)
         display = self.text or self.placeholder
         img = font.render(display, True, WHITE if self.text else (170, 180, 205))
-        clipped = img
         if img.get_width() > self.rect.width - 20:
             display = display[-max(1, len(display) // 2):]
-            clipped = font.render(display, True, WHITE if self.text else (170, 180, 205))
-        surface.blit(clipped, (self.rect.x + 10, self.rect.centery - clipped.get_height() // 2))
+            img = font.render(display, True, WHITE if self.text else (170, 180, 205))
+        surface.blit(img, (self.rect.x + 10, self.rect.centery - img.get_height() // 2))
 
     def handle_event(self, event):
         submit = False
@@ -164,6 +185,22 @@ def draw_text(surface, text, font, color, center=None, topleft=None):
     return rect
 
 
+def wrap_text(text, max_chars):
+    lines = []
+    current = ""
+    for word in text.split():
+        test = word if not current else current + " " + word
+        if len(test) <= max_chars:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
 class WerewolfOnlineGame:
     def __init__(self, host, player_name):
         pygame.init()
@@ -187,7 +224,7 @@ class WerewolfOnlineGame:
         self.night_target_name = None
         self.seer_result = None
         self.can_act = False
-        self.max_players = 12
+        self.max_players = 8
         self.role_config = normalize_role_config({})
         self.chat_history = []
         self.chat_scroll = 0
@@ -200,9 +237,13 @@ class WerewolfOnlineGame:
         self.chat_send_btn = Button("ENVOYER", (55, 85, 125), (75, 105, 155))
         self.chat_input = InputBox()
         self.player_rects = []
-        self.role_row_rects = []
+        self.role_row_rects = {}
         self.role_minus_rects = {}
         self.role_plus_rects = {}
+        self.count_left_rect = pygame.Rect(0, 0, 0, 0)
+        self.count_right_rect = pygame.Rect(0, 0, 0, 0)
+        self.role_list_rect = pygame.Rect(0, 0, 0, 0)
+        self.role_info_rect = pygame.Rect(0, 0, 0, 0)
         self.compute_layout()
 
     def fonts(self):
@@ -213,24 +254,29 @@ class WerewolfOnlineGame:
             "medium": pygame.font.SysFont("arial", max(22, int(26 * scale))),
             "big": pygame.font.SysFont("arial", max(30, int(38 * scale))),
             "title": pygame.font.SysFont("arial", max(40, int(52 * scale)), bold=True),
+            "huge": pygame.font.SysFont("arial", max(46, int(62 * scale)), bold=True),
         }
 
     def compute_layout(self):
         w, h = self.screen.get_size()
-        self.top_rect = pygame.Rect(20, 20, w - 40, 90)
-        self.left_rect = pygame.Rect(20, 130, int(w * 0.30), h - 200)
-        self.center_rect = pygame.Rect(self.left_rect.right + 20, 130, int(w * 0.35), h - 200)
-        self.chat_rect = pygame.Rect(self.center_rect.right + 20, 130, w - self.left_rect.width - self.center_rect.width - 80, h - 200)
+        self.top_rect = pygame.Rect(20, 20, w - 40, 70)
+        self.left_rect = pygame.Rect(20, 100, int(w * 0.30), h - 160)
+        self.center_rect = pygame.Rect(self.left_rect.right + 20, 100, int(w * 0.35), h - 160)
+        self.chat_rect = pygame.Rect(self.center_rect.right + 20, 100, w - self.left_rect.width - self.center_rect.width - 80, h - 160)
         self.bottom_rect = pygame.Rect(20, h - 60, w - 40, 40)
         btn_w = min(260, self.center_rect.width - 40)
-        self.start_btn.set_rect((self.center_rect.x + 20, self.center_rect.bottom - 60, self.center_rect.width - 40, 44))
+        self.start_btn.set_rect((self.center_rect.x + 20, self.center_rect.bottom - 54, self.center_rect.width - 40, 46))
         self.vote_btn.set_rect((self.center_rect.x + 20, self.center_rect.bottom - 60, btn_w, 44))
         self.skip_btn.set_rect((self.center_rect.x + 20 + btn_w + 14, self.center_rect.bottom - 60, max(140, self.center_rect.width - btn_w - 54), 44))
         self.sync_btn.set_rect((self.top_rect.right - 220, self.top_rect.y + 22, 200, 42))
         self.chat_input.set_rect((self.chat_rect.x + 18, self.chat_rect.bottom - 58, self.chat_rect.width - 136, 42))
         self.chat_send_btn.set_rect((self.chat_rect.right - 104, self.chat_rect.bottom - 58, 86, 42))
-        self.role_list_rect = pygame.Rect(self.center_rect.x + 14, self.center_rect.y + 112, self.center_rect.width - 28, self.center_rect.height - 290)
-        self.role_desc_rect = pygame.Rect(self.center_rect.x + 14, self.center_rect.bottom - 170, self.center_rect.width - 28, 94)
+        top_x = self.center_rect.x + 18
+        top_w = self.center_rect.width - 36
+        self.roles_title_y = self.center_rect.y + 392
+        self.roles_notice_y = self.center_rect.y + 430
+        self.role_list_rect = pygame.Rect(top_x, self.center_rect.y + 470, top_w, 180)
+        self.role_info_rect = pygame.Rect(top_x, self.center_rect.y + 660, top_w, 86)
 
     def current_role(self):
         if self.your_id is None:
@@ -289,8 +335,20 @@ class WerewolfOnlineGame:
             new_config[role_name] = max(1, min(max_count, current + delta))
         else:
             new_config[role_name] = max(0, min(max_count, current + delta))
+        required = min_players_for_config(new_config)
+        if self.max_players < required:
+            self.network.send({"type": "update_max_players", "max_players": required})
         if new_config != self.role_config:
             self.network.send({"type": "update_role_config", "role_config": new_config})
+
+    def send_max_players_update(self, delta):
+        if not self.is_host() or self.phase != "lobby":
+            return
+        target = self.max_players + delta
+        target = max(MIN_PLAYERS, min(MAX_PLAYERS, target))
+        target = max(target, len(self.players), min_players_for_config(self.role_config))
+        if target != self.max_players:
+            self.network.send({"type": "update_max_players", "max_players": target})
 
     def send_action(self):
         role = self.current_role()
@@ -340,136 +398,227 @@ class WerewolfOnlineGame:
             self.player_rects.append((p["id"], rect))
             y += 56
 
+    def draw_player_count_selector(self, rect, fonts):
+        draw_text(self.screen, "Nombre de joueurs", fonts["big"], WHITE, topleft=(rect.x, rect.y))
+        pill = pygame.Rect(rect.x, rect.y + 52, rect.width, 70)
+        pygame.draw.rect(self.screen, PILL_BG, pill, border_radius=35)
+        values = [max(MIN_PLAYERS, min(MAX_PLAYERS, self.max_players - 2 + i)) for i in range(5)]
+        slot_w = pill.width // 5
+        active = pygame.Rect(pill.x + 2 * slot_w + 6, pill.y + 6, slot_w - 12, pill.height - 12)
+        pygame.draw.rect(self.screen, PILL_ACTIVE, active, border_radius=30)
+        self.count_left_rect = pygame.Rect(pill.x + 10, pill.y + 10, 50, 50)
+        self.count_right_rect = pygame.Rect(pill.right - 60, pill.y + 10, 50, 50)
+        left_enabled = self.is_host() and self.max_players > max(MIN_PLAYERS, len(self.players), min_players_for_config(self.role_config))
+        right_enabled = self.is_host() and self.max_players < MAX_PLAYERS
+        left_color = WHITE if left_enabled else (155, 155, 175)
+        right_color = WHITE if right_enabled else (155, 155, 175)
+        pygame.draw.ellipse(self.screen, left_color, self.count_left_rect)
+        pygame.draw.ellipse(self.screen, right_color, self.count_right_rect)
+        draw_text(self.screen, "‹", fonts["huge"], (20, 20, 28), center=self.count_left_rect.center)
+        draw_text(self.screen, "›", fonts["huge"], (20, 20, 28), center=self.count_right_rect.center)
+        for i, value in enumerate(values):
+            cx = pill.x + slot_w * i + slot_w // 2
+            color = WHITE if i == 2 else (130, 136, 165)
+            font = fonts["huge"] if i == 2 else fonts["medium"]
+            draw_text(self.screen, str(value), font, color, center=(cx, pill.centery))
+
+    def draw_balance_bar(self, rect, fonts):
+        balance = camp_balance(self.max_players, self.role_config)
+        village_w = max(1, int(rect.width * balance["village_ratio"]))
+        wolf_w = max(1, rect.width - village_w)
+        draw_text(self.screen, "Composition", fonts["big"], WHITE, topleft=(rect.x, rect.y - 48))
+        label = "Équilibrée"
+        if balance["village_ratio"] > 0.58:
+            label = "Village favorisé"
+        elif balance["wolves_ratio"] > 0.58:
+            label = "Loups favorisés"
+        label_img = fonts["big"].render(label, True, WHITE)
+        self.screen.blit(label_img, (rect.right - label_img.get_width(), rect.y - 48))
+        pygame.draw.rect(self.screen, BLUE_BAR, (rect.x, rect.y, village_w, rect.height), border_radius=18)
+        pygame.draw.rect(self.screen, RED_BAR, (rect.x + village_w, rect.y, wolf_w, rect.height), border_radius=18)
+        knob_x = rect.x + village_w
+        pygame.draw.ellipse(self.screen, WHITE, (knob_x - 12, rect.y - 3, 24, rect.height + 6))
+        draw_text(self.screen, f"Connectés : {len(self.players)}/{self.max_players}", fonts["small"], CYAN, topleft=(rect.x, rect.y - 22))
+        village_txt = f"Village {balance['counts']['Villageois']}"
+        wolf_txt = f"Loups {balance['counts']['Loups']}"
+        draw_text(self.screen, village_txt, fonts["small"], WHITE, topleft=(rect.x + 6, rect.y + rect.height + 8))
+        txt = fonts["small"].render(wolf_txt, True, WHITE)
+        self.screen.blit(txt, (rect.right - txt.get_width() - 6, rect.y + rect.height + 8))
+
+    def row_color_for(self, role_name, selected=False):
+        if selected:
+            return ROW_BG_SEL
+        return ROW_BG
+
+    def draw_role_rows(self, fonts):
+        self.role_row_rects = {}
+        self.role_minus_rects = {}
+        self.role_plus_rects = {}
+        roles = [
+            ("Rôles classiques", CLASSIC_ROLE_NAMES),
+            ("Rôles spéciaux", SPECIAL_ROLE_NAMES),
+        ]
+        row_h = 50
+        header_h = 30
+        gap = 6
+        total_h = 0
+        flat = []
+        for title, names in roles:
+            flat.append(("header", title))
+            total_h += header_h
+            for name in names:
+                flat.append(("role", name))
+                total_h += row_h + gap
+            total_h += 8
+        visible_h = self.role_list_rect.height - 12
+        max_scroll = max(0, total_h - visible_h)
+        self.role_scroll = max(0, min(self.role_scroll, max_scroll))
+        content_y = self.role_list_rect.y + 8 - self.role_scroll
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(self.role_list_rect)
+        for kind, value in flat:
+            if kind == "header":
+                pygame.draw.rect(self.screen, (106, 78, 152), (self.role_list_rect.x + 6, content_y, self.role_list_rect.width - 18, header_h), border_radius=12)
+                draw_text(self.screen, value, fonts["medium"], WHITE, topleft=(self.role_list_rect.x + 18, content_y + 4))
+                content_y += header_h + 6
+                continue
+            role_name = value
+            details = ROLE_CATALOG[role_name]
+            row = pygame.Rect(self.role_list_rect.x + 10, content_y, self.role_list_rect.width - 24, row_h)
+            selected = role_name == self.selected_role_name
+            mouse_pos = pygame.mouse.get_pos()
+            hovered = row.collidepoint(mouse_pos)
+            base_color = self.row_color_for(role_name, selected)
+            if hovered and not selected:
+                base_color = (108, 82, 156)
+            pygame.draw.rect(self.screen, base_color, row, border_radius=14)
+            pygame.draw.rect(self.screen, BUTTON_BORDER, row, 1, border_radius=14)
+            badge = pygame.Rect(row.x + 10, row.y + 8, 70, 34)
+            camp = details["camp"]
+            badge_color = ROLE_NEUTRAL
+            if camp == "Loups":
+                badge_color = ROLE_WOLF
+            elif camp == "Village":
+                badge_color = ROLE_VILLAGE
+            pygame.draw.rect(self.screen, badge_color, badge, border_radius=14)
+            pygame.draw.rect(self.screen, BUTTON_BORDER, badge, 1, border_radius=14)
+            draw_text(self.screen, details.get("ui_icon", role_name[:2].upper()), fonts["medium"], WHITE, center=badge.center)
+            draw_text(self.screen, role_name, fonts["medium"], WHITE, topleft=(row.x + 94, row.y + 4))
+            draw_text(self.screen, details["camp"], fonts["small"], CYAN, topleft=(row.x + 94, row.y + 26))
+            count_rect = pygame.Rect(row.right - 142, row.y + 8, 44, 34)
+            minus_rect = pygame.Rect(row.right - 92, row.y + 8, 34, 34)
+            plus_rect = pygame.Rect(row.right - 48, row.y + 8, 34, 34)
+            pygame.draw.rect(self.screen, COUNT_BG, count_rect, border_radius=12)
+            pygame.draw.rect(self.screen, BUTTON_BORDER, count_rect, 2, border_radius=12)
+            enabled = self.is_host()
+            pygame.draw.rect(self.screen, BTN_MINUS if enabled else (88, 88, 112), minus_rect, border_radius=12)
+            pygame.draw.rect(self.screen, BTN_PLUS if enabled else (88, 88, 112), plus_rect, border_radius=12)
+            pygame.draw.rect(self.screen, BUTTON_BORDER, minus_rect, 2, border_radius=12)
+            pygame.draw.rect(self.screen, BUTTON_BORDER, plus_rect, 2, border_radius=12)
+            draw_text(self.screen, str(self.role_config.get(role_name, 0)), fonts["medium"], WHITE, center=count_rect.center)
+            draw_text(self.screen, "-", fonts["medium"], WHITE if enabled else (160, 160, 175), center=minus_rect.center)
+            draw_text(self.screen, "+", fonts["medium"], WHITE if enabled else (160, 160, 175), center=plus_rect.center)
+            self.role_row_rects[role_name] = row
+            self.role_minus_rects[role_name] = minus_rect
+            self.role_plus_rects[role_name] = plus_rect
+            content_y += row_h + gap
+        self.screen.set_clip(old_clip)
+        if total_h > visible_h:
+            bar_x = self.role_list_rect.right - 8
+            bar_y = self.role_list_rect.y + 8
+            bar_h = self.role_list_rect.height - 16
+            pygame.draw.rect(self.screen, (38, 38, 66), (bar_x, bar_y, 5, bar_h), border_radius=3)
+            thumb_h = max(26, int(bar_h * (visible_h / total_h)))
+            thumb_y = bar_y + int((bar_h - thumb_h) * (self.role_scroll / max_scroll if max_scroll else 0))
+            pygame.draw.rect(self.screen, CYAN, (bar_x, thumb_y, 5, thumb_h), border_radius=3)
+
+    def draw_role_info(self, fonts):
+        details = self.selected_role_details()
+        pygame.draw.rect(self.screen, (101, 77, 151), self.role_info_rect, border_radius=18)
+        pygame.draw.rect(self.screen, BUTTON_BORDER, self.role_info_rect, 1, border_radius=18)
+        title_y = self.role_info_rect.y + 10
+        meta_y = self.role_info_rect.y + 36
+        text_y = self.role_info_rect.y + 60
+        draw_text(self.screen, self.selected_role_name, fonts["medium"], WHITE, topleft=(self.role_info_rect.x + 14, title_y))
+        draw_text(self.screen, f"Camp : {details['camp']}  |  Aura : {details['aura']}", fonts["small"], CYAN, topleft=(self.role_info_rect.x + 14, meta_y))
+        lines = wrap_text(details["description"], max(46, (self.role_info_rect.width - 28) // 9))
+        for i, line in enumerate(lines[:1]):
+            draw_text(self.screen, line, fonts["small"], WHITE, topleft=(self.role_info_rect.x + 14, text_y + i * 18))
+
     def draw_role_lobby_panel(self):
         f = self.fonts()
         draw_glass_panel(self.screen, self.center_rect, radius=22)
         draw_text(self.screen, self.server_name, f["big"], WHITE, topleft=(self.center_rect.x + 18, self.center_rect.y + 14))
         draw_text(self.screen, "Lobby", f["medium"], GOLD, topleft=(self.center_rect.x + 20, self.center_rect.y + 68))
-        role = self.current_role() or "Non attribué"
-        draw_text(self.screen, f"Ton rôle : {role}", f["medium"], CYAN, topleft=(self.center_rect.x + 20, self.center_rect.y + 104))
-        draw_text(self.screen, f"Joueurs : {len(self.players)}/{self.max_players}", f["small"], WHITE, topleft=(self.center_rect.x + 20, self.center_rect.y + 138))
-        draw_text(self.screen, f"Configuration : {role_config_label(self.role_config)}", f["small"], WHITE, topleft=(self.center_rect.x + 20, self.center_rect.y + 162))
-        notice = "Seul l'hôte peut modifier la composition." if not self.is_host() else "Tu es l'hôte : ajuste les rôles puis lance la partie."
-        draw_text(self.screen, notice, f["small"], GOLD if self.is_host() else WHITE, topleft=(self.center_rect.x + 20, self.center_rect.y + 186))
+        top_x = self.center_rect.x + 18
+        top_w = self.center_rect.width - 36
+        player_block = pygame.Rect(top_x, self.center_rect.y + 96, top_w, 150)
+        balance_block = pygame.Rect(top_x, self.center_rect.y + 258, top_w, 110)
+        roles_block = pygame.Rect(top_x, self.center_rect.y + 382, top_w, self.center_rect.height - 470)
+        draw_glass_panel(self.screen, player_block, radius=20)
+        draw_glass_panel(self.screen, balance_block, radius=20)
+        draw_glass_panel(self.screen, roles_block, radius=20)
+        self.draw_player_count_selector(pygame.Rect(top_x + 10, self.center_rect.y + 112, top_w - 20, 120), f)
+        self.draw_balance_bar(pygame.Rect(top_x + 10, self.center_rect.y + 292, top_w - 20, 26), f)
+        draw_text(self.screen, "Rôles", f["big"], WHITE, topleft=(top_x, self.roles_title_y))
+        pygame.draw.line(
+            self.screen,
+            (120, 110, 160),
+            (top_x, self.roles_title_y + 42),
+            (top_x + top_w, self.roles_title_y + 42),
+            1
+        )
 
-        pygame.draw.rect(self.screen, PURPLE_2, self.role_list_rect, border_radius=16)
-        pygame.draw.rect(self.screen, PANEL_BORDER, self.role_list_rect, 1, border_radius=16)
-
-        row_h = 66
-        visible_count = max(1, self.role_list_rect.height // row_h)
-        role_names = [role for role in ROLES_ORDER if role != "Villageois"]
-        max_scroll = max(0, len(role_names) - visible_count)
-        self.role_scroll = max(0, min(self.role_scroll, max_scroll))
-        visible_roles = role_names[self.role_scroll:self.role_scroll + visible_count]
-
-        self.role_row_rects = []
-        self.role_minus_rects = {}
-        self.role_plus_rects = {}
-        y = self.role_list_rect.y + 8
-        mouse = pygame.mouse.get_pos()
-        for role_name in visible_roles:
-            row = pygame.Rect(self.role_list_rect.x + 8, y, self.role_list_rect.width - 24, 56)
-            selected = role_name == self.selected_role_name
-            bg = (100, 76, 138) if selected else (58, 42, 88)
-            pygame.draw.rect(self.screen, bg, row, border_radius=12)
-            pygame.draw.rect(self.screen, BUTTON_BORDER, row, 1, border_radius=12)
-            draw_text(self.screen, role_name, f["medium"], WHITE, topleft=(row.x + 14, row.y + 6))
-            draw_text(self.screen, ROLE_CATALOG[role_name]["camp"], f["small"], GOLD if ROLE_CATALOG[role_name]["camp"] == "Loups" else CYAN, topleft=(row.x + 14, row.y + 30))
-            val_rect = pygame.Rect(row.right - 148, row.y + 8, 42, 40)
-            minus_rect = pygame.Rect(row.right - 98, row.y + 8, 40, 40)
-            plus_rect = pygame.Rect(row.right - 48, row.y + 8, 40, 40)
-            pygame.draw.rect(self.screen, (24, 18, 42), val_rect, border_radius=10)
-            pygame.draw.rect(self.screen, BUTTON_BORDER, val_rect, 2, border_radius=10)
-            pygame.draw.rect(self.screen, (120, 70, 82) if self.is_host() else (88, 70, 82), minus_rect, border_radius=12)
-            pygame.draw.rect(self.screen, (86, 126, 92) if self.is_host() else (72, 92, 72), plus_rect, border_radius=12)
-            pygame.draw.rect(self.screen, BUTTON_BORDER, minus_rect, 2, border_radius=12)
-            pygame.draw.rect(self.screen, BUTTON_BORDER, plus_rect, 2, border_radius=12)
-            draw_text(self.screen, str(self.role_config.get(role_name, 0)), f["medium"], WHITE, center=val_rect.center)
-            draw_text(self.screen, "-", f["medium"], WHITE if self.is_host() else (160, 160, 160), center=minus_rect.center)
-            draw_text(self.screen, "+", f["medium"], WHITE if self.is_host() else (160, 160, 160), center=plus_rect.center)
-            self.role_row_rects.append((role_name, row))
-            self.role_minus_rects[role_name] = minus_rect
-            self.role_plus_rects[role_name] = plus_rect
-            y += row_h
-
-        if len(role_names) > visible_count:
-            bar_x = self.role_list_rect.right - 10
-            bar_y = self.role_list_rect.y + 8
-            bar_h = self.role_list_rect.height - 16
-            pygame.draw.rect(self.screen, (40, 40, 70), (bar_x, bar_y, 6, bar_h), border_radius=3)
-            thumb_h = max(28, int(bar_h * (visible_count / len(role_names))))
-            scroll_ratio = 0 if max_scroll == 0 else self.role_scroll / max_scroll
-            thumb_y = bar_y + int((bar_h - thumb_h) * scroll_ratio)
-            pygame.draw.rect(self.screen, CYAN, (bar_x, thumb_y, 6, thumb_h), border_radius=3)
-
-        pygame.draw.rect(self.screen, PURPLE, self.role_desc_rect, border_radius=16)
-        pygame.draw.rect(self.screen, BUTTON_BORDER, self.role_desc_rect, 1, border_radius=16)
-        details = self.selected_role_details()
-        draw_text(self.screen, self.selected_role_name, f["medium"], WHITE, topleft=(self.role_desc_rect.x + 12, self.role_desc_rect.y + 10))
-        draw_text(self.screen, f"Camp : {details['camp']}  |  Aura : {details['aura']}", f["small"], CYAN, topleft=(self.role_desc_rect.x + 12, self.role_desc_rect.y + 36))
-        desc = details["description"]
-        max_chars = max(40, (self.role_desc_rect.width - 24) // 9)
-        lines = []
-        current = ""
-        for word in desc.split():
-            test = word if not current else current + " " + word
-            if len(test) <= max_chars:
-                current = test
-            else:
-                lines.append(current)
-                current = word
-        if current:
-            lines.append(current)
-        for i, line in enumerate(lines[:2]):
-            draw_text(self.screen, line, f["small"], WHITE, topleft=(self.role_desc_rect.x + 12, self.role_desc_rect.y + 58 + i * 20))
-
-        can_start = self.is_host() and len(self.players) >= MIN_PLAYERS
-        self.start_btn.draw(self.screen, f["small"], mouse, enabled=can_start)
+        notice = "Seul l'hôte peut modifier la composition." if not self.is_host() else "Régle le nombre de joueurs puis ajuste les rôles."
+        draw_text(
+            self.screen,
+            notice,
+            f["small"],
+            GOLD if self.is_host() else WHITE,
+            topleft=(top_x, self.roles_notice_y + 6)
+        )
+        error = role_config_error(self.max_players, self.role_config)
+        if error:
+            draw_text(self.screen, error, f["small"], RED, topleft=(top_x, self.roles_notice_y + 22))
+        pygame.draw.rect(self.screen, PURPLE_2, self.role_list_rect, border_radius=18)
+        pygame.draw.rect(self.screen, PANEL_BORDER, self.role_list_rect, 1, border_radius=18)
+        self.draw_role_rows(f)
+        self.draw_role_info(f)
+        footer_rect = pygame.Rect(
+            self.center_rect.x + 8,
+            self.center_rect.bottom - 66,
+            self.center_rect.width - 16,
+            58
+        )
+        pygame.draw.rect(self.screen, (36, 28, 56), footer_rect, border_radius=18)
+        pygame.draw.rect(self.screen, PANEL_BORDER, footer_rect, 1, border_radius=18)
+        can_start = self.is_host() and len(self.players) == self.max_players and error is None
+        self.start_btn.draw(self.screen, f["small"], pygame.mouse.get_pos(), enabled=can_start)
 
     def draw_info_panel(self):
         f = self.fonts()
         draw_glass_panel(self.screen, self.center_rect, radius=22)
         draw_text(self.screen, self.server_name, f["big"], WHITE, topleft=(self.center_rect.x + 18, self.center_rect.y + 14))
-        phase_label = {
-            "lobby": "Lobby",
-            "night": f"Nuit {self.day_count}",
-            "day": f"Jour {self.day_count}",
-            "end": "Fin de partie",
-        }.get(self.phase, self.phase)
+        phase_label = {"lobby": "Lobby", "night": f"Nuit {self.day_count}", "day": f"Jour {self.day_count}", "end": "Fin de partie"}.get(self.phase, self.phase)
         draw_text(self.screen, phase_label, f["medium"], GOLD, topleft=(self.center_rect.x + 20, self.center_rect.y + 68))
         role = self.current_role() or "Non attribué"
         draw_text(self.screen, f"Ton rôle : {role}", f["medium"], CYAN, topleft=(self.center_rect.x + 20, self.center_rect.y + 104))
         draw_text(self.screen, f"Places : {len(self.players)}/{self.max_players}", f["small"], WHITE, topleft=(self.center_rect.x + 20, self.center_rect.y + 138))
-        draw_text(self.screen, f"Config : {role_config_label(self.role_config)}", f["small"], WHITE, topleft=(self.center_rect.x + 20, self.center_rect.y + 164))
-        draw_text(self.screen, self.message, f["small"], WHITE, topleft=(self.center_rect.x + 20, self.center_rect.y + 198))
+        draw_text(self.screen, self.message, f["small"], WHITE, topleft=(self.center_rect.x + 20, self.center_rect.y + 164))
         if self.action_hint:
-            draw_text(self.screen, self.action_hint, f["small"], GOLD, topleft=(self.center_rect.x + 20, self.center_rect.y + 228))
+            draw_text(self.screen, self.action_hint, f["small"], GOLD, topleft=(self.center_rect.x + 20, self.center_rect.y + 194))
         if self.night_target_name:
-            draw_text(self.screen, f"Victime visée : {self.night_target_name}", f["small"], RED, topleft=(self.center_rect.x + 20, self.center_rect.y + 258))
+            draw_text(self.screen, f"Victime visée : {self.night_target_name}", f["small"], RED, topleft=(self.center_rect.x + 20, self.center_rect.y + 224))
         if self.seer_result:
-            draw_text(self.screen, self.seer_result, f["small"], GREEN, topleft=(self.center_rect.x + 20, self.center_rect.y + 288))
+            draw_text(self.screen, self.seer_result, f["small"], GREEN, topleft=(self.center_rect.x + 20, self.center_rect.y + 254))
         if self.last_deaths:
-            draw_text(self.screen, "Derniers éliminés : " + ", ".join(self.last_deaths), f["small"], RED, topleft=(self.center_rect.x + 20, self.center_rect.y + 318))
+            draw_text(self.screen, "Derniers éliminés : " + ", ".join(self.last_deaths), f["small"], RED, topleft=(self.center_rect.x + 20, self.center_rect.y + 284))
         details = ROLE_CATALOG.get(role, ROLE_CATALOG["Villageois"])
-        draw_text(self.screen, f"Aura : {details['aura']}  |  Camp : {details['camp']}", f["small"], CYAN, topleft=(self.center_rect.x + 20, self.center_rect.y + 350))
-        desc = details["description"]
-        max_chars = max(40, (self.center_rect.width - 40) // 9)
-        lines = []
-        current = ""
-        for word in desc.split():
-            test = word if not current else current + " " + word
-            if len(test) <= max_chars:
-                current = test
-            else:
-                lines.append(current)
-                current = word
-        if current:
-            lines.append(current)
-        y = self.center_rect.y + 382
-        for line in lines[:4]:
-            draw_text(self.screen, line, self.fonts()["small"], WHITE, topleft=(self.center_rect.x + 20, y))
+        draw_text(self.screen, f"Aura : {details['aura']}  |  Camp : {details['camp']}", f["small"], CYAN, topleft=(self.center_rect.x + 20, self.center_rect.y + 318))
+        y = self.center_rect.y + 350
+        for line in wrap_text(details["description"], max(40, (self.center_rect.width - 40) // 9))[:4]:
+            draw_text(self.screen, line, f["small"], WHITE, topleft=(self.center_rect.x + 20, y))
             y += 24
-
         mouse = pygame.mouse.get_pos()
         if self.phase in ("night", "day"):
             self.vote_btn.text = "VALIDER LE VOTE" if self.phase == "day" else "VALIDER L'ACTION"
@@ -482,20 +631,15 @@ class WerewolfOnlineGame:
         f = self.fonts()
         draw_glass_panel(self.screen, self.chat_rect, radius=22)
         draw_text(self.screen, "Chat", f["big"], WHITE, topleft=(self.chat_rect.x + 18, self.chat_rect.y + 14))
-
         visible_top = self.chat_rect.y + 62
         visible_bottom = self.chat_rect.bottom - 70
         line_height = 48
         max_visible = max(1, (visible_bottom - visible_top) // line_height)
-
         total_messages = len(self.chat_history)
         max_scroll = max(0, total_messages - max_visible)
         self.chat_scroll = max(0, min(self.chat_scroll, max_scroll))
-
         start_index = max(0, total_messages - max_visible - self.chat_scroll)
-        end_index = start_index + max_visible
-        visible = self.chat_history[start_index:end_index]
-
+        visible = self.chat_history[start_index:start_index + max_visible]
         y = visible_top
         for entry in visible:
             color = GOLD if entry.get("system") else CYAN
@@ -504,18 +648,14 @@ class WerewolfOnlineGame:
             y += 20
             draw_text(self.screen, entry.get("message", ""), f["small"], WHITE, topleft=(self.chat_rect.x + 26, y))
             y += 28
-
         if total_messages > max_visible:
             bar_x = self.chat_rect.right - 12
             bar_y = visible_top
             bar_h = visible_bottom - visible_top
             pygame.draw.rect(self.screen, (40, 40, 70), (bar_x, bar_y, 6, bar_h), border_radius=3)
-
             thumb_h = max(30, int(bar_h * (max_visible / total_messages)))
-            scroll_ratio = 0 if max_scroll == 0 else self.chat_scroll / max_scroll
-            thumb_y = bar_y + int((bar_h - thumb_h) * scroll_ratio)
+            thumb_y = bar_y + int((bar_h - thumb_h) * (self.chat_scroll / max_scroll if max_scroll else 0))
             pygame.draw.rect(self.screen, CYAN, (bar_x, thumb_y, 6, thumb_h), border_radius=3)
-
         self.chat_input.draw(self.screen, f["small"])
         self.chat_send_btn.draw(self.screen, f["small"], pygame.mouse.get_pos(), enabled=True)
 
@@ -535,25 +675,16 @@ class WerewolfOnlineGame:
         else:
             self.draw_info_panel()
         self.draw_chat_panel()
-        draw_text(self.screen, "Clique sur des joueurs vivants pour les sélectionner. Molette sur chat ou rôles.", f["small"], WHITE, center=self.bottom_rect.center)
+        draw_text(self.screen, "Molette sur la liste des rôles ou le chat pour défiler.", f["small"], WHITE, center=self.bottom_rect.center)
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEWHEEL:
-            mouse_x, mouse_y = pygame.mouse.get_pos()
-            if self.chat_rect.collidepoint((mouse_x, mouse_y)):
-                if event.y > 0:
-                    self.chat_scroll = min(self.chat_scroll + 1, max(0, len(self.chat_history) - 1))
-                elif event.y < 0:
-                    self.chat_scroll = max(self.chat_scroll - 1, 0)
+            mouse_pos = pygame.mouse.get_pos()
+            if self.chat_rect.collidepoint(mouse_pos):
+                self.chat_scroll = max(0, self.chat_scroll - event.y)
                 return
-            if self.phase == "lobby" and self.role_list_rect.collidepoint((mouse_x, mouse_y)):
-                role_count = len([r for r in ROLES_ORDER if r != "Villageois"])
-                visible_count = max(1, self.role_list_rect.height // 66)
-                max_scroll = max(0, role_count - visible_count)
-                if event.y > 0:
-                    self.role_scroll = max(self.role_scroll - 1, 0)
-                elif event.y < 0:
-                    self.role_scroll = min(self.role_scroll + 1, max_scroll)
+            if self.phase == "lobby" and self.role_list_rect.collidepoint(mouse_pos):
+                self.role_scroll = max(0, self.role_scroll - event.y * 28)
                 return
         if event.type == pygame.VIDEORESIZE:
             self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
@@ -571,14 +702,20 @@ class WerewolfOnlineGame:
             self.send_chat()
             return
         if self.phase == "lobby":
-            for role_name, row in self.role_row_rects:
+            if self.count_left_rect.collidepoint(event.pos):
+                self.send_max_players_update(-1)
+                return
+            if self.count_right_rect.collidepoint(event.pos):
+                self.send_max_players_update(+1)
+                return
+            for role_name, row in self.role_row_rects.items():
                 if row.collidepoint(event.pos):
                     self.selected_role_name = role_name
-                if self.role_minus_rects.get(role_name) and self.role_minus_rects[role_name].collidepoint(event.pos):
+                if self.role_minus_rects[role_name].collidepoint(event.pos):
                     self.selected_role_name = role_name
                     self.send_role_config_update(role_name, -1)
                     return
-                if self.role_plus_rects.get(role_name) and self.role_plus_rects[role_name].collidepoint(event.pos):
+                if self.role_plus_rects[role_name].collidepoint(event.pos):
                     self.selected_role_name = role_name
                     self.send_role_config_update(role_name, +1)
                     return
