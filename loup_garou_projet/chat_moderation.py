@@ -58,7 +58,7 @@ class ChatModerator:
     @staticmethod
     def _mask(match):
         text = match.group(0)
-        return "*" * len(text)
+        return "".join("*" if not ch.isspace() else ch for ch in text)
 
     def moderate(self, message):
         clean = message
