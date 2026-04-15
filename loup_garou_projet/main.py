@@ -1,7 +1,7 @@
 import threading
 import time
 import pygame
-import socket
+
 from loup_garou_online import WerewolfOnlineGame
 from loup_garou_solo import WerewolfSoloGame
 from loup_server import WerewolfServer
