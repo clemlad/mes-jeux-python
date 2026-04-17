@@ -161,10 +161,17 @@ class WerewolfServer:
             return {"type": "error", "message": "Seul l'hôte peut modifier les rôles."}
         if self.game_started or self.phase != "lobby":
             return {"type": "error", "message": "La configuration n'est modifiable qu'avant la partie."}
-        self.role_config = normalize_role_config(msg.get("role_config", {}))
-        required = min_players_for_config(self.role_config)
+
+        new_config = normalize_role_config(msg.get("role_config", {}))
+        required = min_players_for_config(new_config)
+
+        if required > MAX_PLAYERS:
+            return {"type": "error", "message": f"Configuration impossible : maximum {MAX_PLAYERS} joueurs."}
+
+        self.role_config = new_config
         if self.max_players < required:
             self.max_players = required
+
         self.broadcaster.set_room_config(self.max_players, role_config_label(self.role_config))
         self.message = "Configuration des rôles mise à jour."
         self.broadcast_snapshots()

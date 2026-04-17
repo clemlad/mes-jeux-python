@@ -8,7 +8,7 @@ ROLE_CATALOG = {
     "Loup-garou": {
         "camp": "Loups",
         "aura": "Sombre",
-        "max": 3,
+        "max": 11,
         "night_action": True,
         "description": "Chaque nuit, les loups-garous choisissent ensemble une victime parmi les autres joueurs vivants.",
         "ui_icon": "LG",
