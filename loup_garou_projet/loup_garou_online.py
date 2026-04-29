@@ -231,7 +231,7 @@ class WerewolfOnlineGame:
         self.role_scroll = 0
         self.selected_role_name = None
         self.show_role_info = False
-        self.role_info_time = 0
+        self.role_info_close_rect = pygame.Rect(0, 0, 0, 0)
         self.start_btn = Button("LANCER LA PARTIE", (90, 120, 80), (110, 145, 95))
         self.vote_btn = Button("VALIDER L'ACTION", (55, 85, 125), (75, 105, 155))
         self.sync_btn = Button("SYNCHRONISER", (70, 70, 110), (90, 90, 140))
@@ -581,36 +581,51 @@ class WerewolfOnlineGame:
         if not self.show_role_info or not self.selected_role_name:
             return
 
-        if pygame.time.get_ticks() - self.role_info_time > 15000:
-            self.show_role_info = False
-            return
-
         details = self.selected_role_details()
 
         info_rect = pygame.Rect(
             self.center_rect.x + 18,
-            self.center_rect.bottom - 132,
+            self.center_rect.bottom - 210,
             self.center_rect.width - 36,
-            70
+            148
         )
 
         pygame.draw.rect(self.screen, (58, 44, 92), info_rect, border_radius=14)
         pygame.draw.rect(self.screen, BUTTON_BORDER, info_rect, 1, border_radius=14)
 
-        title_text = f"{self.selected_role_name} — Camp : {details['camp']} | Aura : {details['aura']}"
+        # croix de fermeture
+        self.role_info_close_rect = pygame.Rect(info_rect.x + 8, info_rect.y + 8, 22, 22)
+        pygame.draw.rect(self.screen, (90, 70, 130), self.role_info_close_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER, self.role_info_close_rect, 1, border_radius=8)
+        draw_text(self.screen, "×", fonts["small"], WHITE, center=self.role_info_close_rect.center)
+
+        # titre
         draw_text(
             self.screen,
-            title_text,
-            fonts["small"],
+            self.selected_role_name,
+            fonts["medium"],
             CYAN,
-            topleft=(info_rect.x + 12, info_rect.y + 6)
+            topleft=(info_rect.x + 40, info_rect.y + 6)
         )
 
-        desc = details.get("description", "")
-        lines = wrap_text(desc, max(38, (info_rect.width - 24) // 9))
+        # méta
+        draw_text(
+            self.screen,
+            f"Camp : {details['camp']} | Aura : {details['aura']}",
+            fonts["small"],
+            CYAN,
+            topleft=(info_rect.x + 12, info_rect.y + 34)
+        )
 
-        y = info_rect.y + 28
-        for line in lines[:2]:
+        # description complète sur plusieurs lignes
+        desc = details.get("description", "")
+        lines = wrap_text(desc, max(34, (info_rect.width - 24) // 9))
+
+        y = info_rect.y + 58
+        max_y = info_rect.bottom - 8
+        for line in lines:
+            if y + 18 > max_y:
+                break
             draw_text(
                 self.screen,
                 line,
@@ -760,11 +775,14 @@ class WerewolfOnlineGame:
     def handle_event(self, event):
         if event.type == pygame.MOUSEWHEEL:
             mouse_pos = pygame.mouse.get_pos()
+
             if self.chat_rect.collidepoint(mouse_pos):
                 self.chat_scroll = max(0, self.chat_scroll - event.y)
                 return
+
             if self.phase == "lobby" and self.role_list_rect.collidepoint(mouse_pos):
                 self.role_scroll = max(0, self.role_scroll - event.y * 28)
+                self.show_role_info = False
                 return
         if event.type == pygame.VIDEORESIZE:
             self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
@@ -774,6 +792,14 @@ class WerewolfOnlineGame:
             self.send_chat()
             return
         if event.type != pygame.MOUSEBUTTONDOWN:
+            return
+        if self.show_role_info:
+            clicked_on_role = any(row.collidepoint(event.pos) for row in self.role_row_rects.values())
+            clicked_on_close = self.role_info_close_rect.collidepoint(event.pos)
+            if not clicked_on_role and not clicked_on_close:
+                self.show_role_info = False
+        if self.show_role_info and self.role_info_close_rect.collidepoint(event.pos):
+            self.show_role_info = False
             return
         if self.sync_btn.is_clicked(event.pos):
             self.network.send({"type": "sync_request"})
@@ -792,19 +818,19 @@ class WerewolfOnlineGame:
                 if row.collidepoint(event.pos):
                     self.selected_role_name = role_name
                     self.show_role_info = True
-                    self.role_info_time = pygame.time.get_ticks()
+                    
 
                 if self.role_minus_rects[role_name].collidepoint(event.pos):
                     self.selected_role_name = role_name
                     self.show_role_info = True
-                    self.role_info_time = pygame.time.get_ticks()
+                    
                     self.send_role_config_update(role_name, -1)
                     return
 
                 if self.role_plus_rects[role_name].collidepoint(event.pos):
                     self.selected_role_name = role_name
                     self.show_role_info = True
-                    self.role_info_time = pygame.time.get_ticks()
+                    
                     self.send_role_config_update(role_name, +1)
                     return
             if self.start_btn.is_clicked(event.pos):

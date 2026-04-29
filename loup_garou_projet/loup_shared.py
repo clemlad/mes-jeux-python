@@ -101,7 +101,7 @@ ROLE_CATALOG = {
         "description": "La sirène envoûte des joueurs puis peut les tuer. Dans cette version, le rôle est attribué mais le pouvoir complet n'est pas encore jouable.",
         "ui_icon": "SI",
     },
-    "Pyroman": {
+    "Pyromane": {
         "camp": "Solo",
         "aura": "Inconnue",
         "max": 1,
@@ -132,7 +132,7 @@ SPECIAL_ROLE_NAMES = [
     "Villageois Maudit",
     "Sniper",
     "Sirène",
-    "Pyroman",
+    "Pyromane",
 ]
 DEFAULT_ROLE_CONFIG = {
     "Loup-garou": 1,
