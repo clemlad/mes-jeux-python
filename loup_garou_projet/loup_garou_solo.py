@@ -4,7 +4,10 @@ AMÉLIORATIONS :
   - Phase de nuit animée avec délais entre chaque action IA
   - Votes diurnes visibles : les IA votent un par un avec messages
   - IA communicante : messages stratégiques durant la discussion
-  - Correction : "Sorcière" avec accent (correspondance avec ROLE_CATALOG)
+  - Tally de votes affiché avant élimination
+  - Écran de fin récapitulatif avec rôles et narration
+  - IA intelligente : loups coordonnés, Voyante mémorise, villageois moutonnier
+  - Chasseur jouable : riposte humaine ou IA automatique
 """
 import random
 from collections import Counter
@@ -12,7 +15,8 @@ import math
 
 import pygame
 
-from loup_shared import (MAX_PLAYERS, MIN_PLAYERS, build_roles, check_winner,
+from loup_shared import (MAX_PLAYERS, MIN_PLAYERS, ROLE_CATALOG,
+                          build_roles, check_winner,
                           serialize_players_for, is_wolf_role)
 from loup_ui_theme import (
     BG_DEEP, BG_TOP, BG_BOTTOM, BG_MID,
@@ -50,7 +54,6 @@ ROLE_BADGE_COLORS = {
     "Villageois":          (40, 100, 60),
 }
 
-# Messages de discussion des IA selon leur rôle (les {} sont remplacés par des noms)
 _WOLF_MSGS = [
     "Je pense que {} se comporte bizarrement...",
     "Moi je suis innocent. Regardez plutôt {}.",
@@ -84,7 +87,6 @@ def _role_badge_col(role: str) -> tuple:
 
 
 def _ai_chat_msg(player: dict, players: list) -> str:
-    """Génère un message contextuel pour une IA selon son rôle."""
     role = player.get("role", "Villageois")
     alive = [p for p in players if p["alive"] and p["id"] != player["id"]]
     if not alive:
@@ -128,10 +130,9 @@ class WerewolfSoloGame:
 
         self.player_name   = player_name
         self.total_players = max(MIN_PLAYERS, min(MAX_PLAYERS, int(player_count)))
-        self.role_config   = role_config  # None → DEFAULT_ROLE_CONFIG via normalize
+        self.role_config   = role_config
         self.player_id     = 0
 
-        # État de partie
         self.players: list       = []
         self.phase: str          = "night"
         self.day_count: int      = 0
@@ -146,18 +147,27 @@ class WerewolfSoloGame:
         self.witch_poison_used   = False
         self.pending_night: dict = {}
 
-        # Système de queue temporisée
         self.game_ms: int       = 0
-        self.action_queue: list = []   # [(abs_ms, callable)]
+        self.action_queue: list = []
         self.is_animating: bool = False
 
-        # Log nuit + chat jour
-        self.night_log: list = []   # messages affichés pendant la nuit
-        self.chat_log: list  = []   # [{"author", "text", "wolf"}]
-        self.day_votes: dict = {}   # {voter_id: target_id} visible
+        self.night_log: list = []
+        self.chat_log: list  = []
+        self.day_votes: dict = {}
+
+        # État Chasseur humain
+        self.hunter_pending      = False
+        self.hunter_pending_done = None
+
+        # Mémoire Voyante IA
+        self.seer_known_wolves: set = set()
+
+        # Log des morts pour l'écran de fin
+        self.death_log: list = []
 
         self.btn_restart = Button("NOUVELLE PARTIE",  BTN_SUCCESS, BTN_SUCCESS_H, icon="")
         self.btn_vote    = Button("VALIDER MON VOTE", BTN_PRIMARY, BTN_PRIMARY_H, icon="")
+        self.btn_hunter  = Button("EMPORTER AVEC MOI", BTN_DANGER,  BTN_DANGER_H,  icon="")
         self.btn_skip    = Button("PASSER",           BTN_NEUTRAL, BTN_NEUTRAL_H)
         self.btn_save    = Button("SAUVER",           BTN_SUCCESS, BTN_SUCCESS_H)
 
@@ -186,6 +196,7 @@ class WerewolfSoloGame:
         by = self.right_rect.bottom - 60
         self.btn_restart.set_rect((bx, by, self.right_rect.width - 40, 46))
         self.btn_vote.set_rect   ((bx, by, bw, 46))
+        self.btn_hunter.set_rect ((bx, by, bw, 46))
         skip_x = bx + bw + 10
         skip_w = max(80, self.right_rect.right - 20 - skip_x)
         self.btn_skip.set_rect   ((skip_x, by, skip_w, 46))
@@ -250,6 +261,10 @@ class WerewolfSoloGame:
         self.night_log         = []
         self.chat_log          = []
         self.day_votes         = {}
+        self.hunter_pending      = False
+        self.hunter_pending_done = None
+        self.seer_known_wolves   = set()
+        self.death_log           = []
 
         self.add_chat("Système", "Bonne chance ! Les rôles ont été distribués.", False)
         self._start_night()
@@ -261,7 +276,11 @@ class WerewolfSoloGame:
         return [p["id"] for p in self.players if p["alive"]]
 
     def human_can_act(self) -> bool:
-        if not self.current_player()["alive"] or self.winner or self.is_animating:
+        if self.winner:
+            return False
+        if self.hunter_pending:
+            return True
+        if not self.current_player()["alive"] or self.is_animating:
             return False
         if self.phase == "day":
             return True
@@ -300,14 +319,20 @@ class WerewolfSoloGame:
             t += 900
             if any(w["id"] == self.player_id for w in wolves):
                 self.schedule(t, self._pause_human_wolf)
-                # _resume_after_human() continuera la chaîne
             else:
                 def _wolves_act(wlist=wolves):
                     votes = []
-                    for w in wlist:
-                        tid = self.random_target(exclude=w["id"])
-                        if tid is not None:
-                            votes.append(tid)
+                    # Les loups coordonnent sur la même cible
+                    non_wolves = [p for p in self.players
+                                  if p["alive"] and not is_wolf_role(p["role"])]
+                    if non_wolves:
+                        shared_target = random.choice(non_wolves)["id"]
+                        votes = [shared_target] * len(wlist)
+                    else:
+                        for w in wlist:
+                            tid = self.random_target(exclude=w["id"])
+                            if tid is not None:
+                                votes.append(tid)
                     if votes:
                         chosen = Counter(votes).most_common(1)[0][0]
                         self.pending_night["wolf_target"] = chosen
@@ -337,6 +362,8 @@ class WerewolfSoloGame:
                 self.pending_night["seer_done"] = True
                 tid = self.random_target(exclude=s["id"])
                 if tid is not None:
+                    if is_wolf_role(self.players[tid]["role"]):
+                        self.seer_known_wolves.add(tid)
                     self.night_msg("La Voyante scrute les âmes dans le noir...")
             self.schedule(t, _seer_act)
             t += 1400
@@ -399,7 +426,6 @@ class WerewolfSoloGame:
             self.action_hint = "Tu es Sorcière : personne n'est visé. Utilise ton poison ?"
 
     def _resume_after_human(self):
-        """Reprend la chaîne de nuit après une action humaine."""
         role = self.current_role()
         self.is_animating = True
         self.action_hint  = ""
@@ -426,11 +452,37 @@ class WerewolfSoloGame:
             deaths.add(self.pending_night["wolf_target"])
         if self.pending_night.get("poison_target") is not None:
             deaths.add(self.pending_night["poison_target"])
+
         for pid in deaths:
             if self.players[pid]["alive"]:
                 self.players[pid]["alive"]         = False
                 self.players[pid]["revealed_role"] = self.players[pid]["role"]
+                cause = ("poison"
+                         if pid == self.pending_night.get("poison_target")
+                         and pid != self.pending_night.get("wolf_target")
+                         else "loup")
+                self.death_log.append({
+                    "name":  self.players[pid]["name"],
+                    "role":  self.players[pid]["role"],
+                    "cause": cause,
+                    "round": self.day_count,
+                })
+
         self.last_deaths = [self.players[pid]["name"] for pid in deaths]
+
+        hunter_deaths = [pid for pid in deaths
+                         if self.players[pid]["role"] == "Chasseur"]
+        if hunter_deaths:
+            def _chain(remaining):
+                if not remaining:
+                    self._continue_after_night()
+                    return
+                self._trigger_hunter(remaining[0], lambda: _chain(remaining[1:]))
+            _chain(hunter_deaths)
+        else:
+            self._continue_after_night()
+
+    def _continue_after_night(self):
         self.winner = check_winner(self.players)
         if self.winner:
             self.phase   = "end"
@@ -449,10 +501,37 @@ class WerewolfSoloGame:
         self.day_votes       = {}
         self._start_day()
 
+    def _trigger_hunter(self, hunter_id: int, on_done):
+        """Déclenche la riposte du Chasseur éliminé."""
+        hunter = self.players[hunter_id]
+        if hunter["id"] == self.player_id:
+            self.hunter_pending      = True
+            self.hunter_pending_done = on_done
+            self.is_animating = False
+            self.action_hint  = (f"{hunter['name']} : tu es le Chasseur ! "
+                                 f"Désigne un joueur à emporter avec toi.")
+        else:
+            targets = [p["id"] for p in self.players
+                       if p["alive"] and p["id"] != hunter_id]
+            if targets:
+                tid = random.choice(targets)
+                self.players[tid]["alive"]         = False
+                self.players[tid]["revealed_role"] = self.players[tid]["role"]
+                self.last_deaths.append(self.players[tid]["name"])
+                self.death_log.append({
+                    "name":  self.players[tid]["name"],
+                    "role":  self.players[tid]["role"],
+                    "cause": "chasseur",
+                    "round": self.day_count,
+                })
+                self.add_chat("Système",
+                              f"{hunter['name']} (Chasseur) emporte "
+                              f"{self.players[tid]['name']} dans la mort !", False)
+            on_done()
+
     # ── Phase de jour ─────────────────────────────────────────────────────────
 
     def _start_day(self):
-        """Discussion des IA puis ouverture du vote."""
         self.is_animating = True
         t = 0
         ai_speakers = [p for p in self.players if p["alive"] and p["id"] != self.player_id]
@@ -469,7 +548,6 @@ class WerewolfSoloGame:
     def _open_vote(self):
         self.message = "C'est l'heure du vote ! Qui est le loup ?"
         if not self.current_player()["alive"]:
-            # Joueur mort → IA votent directement
             self.add_chat("Système", "Tu es éliminé. Le village vote sans toi.", False)
             self.is_animating = True
             self._ai_votes()
@@ -478,46 +556,94 @@ class WerewolfSoloGame:
             self.is_animating = False
 
     def _ai_votes(self):
-        """Les IA votent une par une avec animation."""
+        """Les IA votent une par une avec IA améliorée."""
         self.is_animating = True
         t = 0
         ai_voters = [p for p in self.players
                      if p["alive"] and p["id"] != self.player_id
                      and p["id"] not in self.day_votes]
         random.shuffle(ai_voters)
+
+        # Cible coordonnée pour tous les loups
+        non_wolves_alive = [p for p in self.players
+                            if p["alive"] and not is_wolf_role(p["role"])]
+        wolf_shared_target = (random.choice(non_wolves_alive)["id"]
+                              if non_wolves_alive else None)
+
         for voter in ai_voters:
-            def _vote(v=voter):
-                # Loup : préfère cibler des non-loups
+            def _vote(v=voter, wt=wolf_shared_target):
                 if is_wolf_role(v["role"]):
-                    pool = [pid for pid in self.alive_ids()
-                            if pid != v["id"] and not is_wolf_role(self.players[pid]["role"])]
-                    if not pool:
+                    # Loups coordonnés : tous visent la même cible
+                    if wt is not None and self.players[wt]["alive"]:
+                        tid = wt
+                    else:
+                        pool = [pid for pid in self.alive_ids()
+                                if pid != v["id"]
+                                and not is_wolf_role(self.players[pid]["role"])]
+                        if not pool:
+                            pool = [pid for pid in self.alive_ids() if pid != v["id"]]
+                        if not pool:
+                            return
+                        tid = random.choice(pool)
+
+                elif v["role"] == "Voyante":
+                    # Vote contre un loup identifié si possible
+                    living_known = [pid for pid in self.seer_known_wolves
+                                    if self.players[pid]["alive"]]
+                    if living_known:
+                        tid = random.choice(living_known)
+                    else:
                         pool = [pid for pid in self.alive_ids() if pid != v["id"]]
+                        if not pool:
+                            return
+                        tid = random.choice(pool)
+
                 else:
+                    # Villageois : comportement légèrement moutonnier
                     pool = [pid for pid in self.alive_ids() if pid != v["id"]]
-                if not pool:
-                    return
-                tid = random.choice(pool)
+                    if not pool:
+                        return
+                    current_counts = Counter(self.day_votes.values())
+                    if current_counts and random.random() < 0.45:
+                        sorted_tgts = [pid for pid, _ in current_counts.most_common()
+                                       if pid in pool]
+                        tid = sorted_tgts[0] if sorted_tgts else random.choice(pool)
+                    else:
+                        tid = random.choice(pool)
+
                 self.day_votes[v["id"]] = tid
                 tgt_name = self.players[tid]["name"]
                 self.add_chat(v["name"], f"Je vote contre {tgt_name}.",
                               is_wolf_role(v.get("role", "")))
+
             self.schedule(t, _vote)
             t += random.randint(700, 1300)
         self.schedule(t + 500, self._resolve_day)
 
     def _resolve_day(self):
-        alive_count = sum(1 for p in self.players if p["alive"])
-        # Remplir les votes manquants (sécurité)
+        # Votes manquants
         for p in self.players:
             if p["alive"] and p["id"] not in self.day_votes:
                 tid = self.random_target(exclude=p["id"])
                 if tid is not None:
                     self.day_votes[p["id"]] = tid
+
         counts: dict = {}
         for tgt in self.day_votes.values():
             counts[tgt] = counts.get(tgt, 0) + 1
         chosen = max(counts.items(), key=lambda x: (x[1], -x[0]))[0]
+
+        # Affiche le tally des votes avant d'annoncer l'éliminé
+        parts = sorted(counts.items(), key=lambda x: -x[1])
+        tally = " | ".join(f"{self.players[pid]['name']}: {cnt} voix"
+                           for pid, cnt in parts)
+        arrow = f"→ {self.players[chosen]['name']} éliminé"
+        self.message = f"Décompte des voix — {tally}  {arrow}"
+        self.add_chat("Système", f"Votes : {tally}", False)
+
+        self.schedule(2400, lambda c=chosen: self._apply_day_result(c))
+
+    def _apply_day_result(self, chosen: int):
         self.players[chosen]["alive"]         = False
         self.players[chosen]["revealed_role"] = self.players[chosen]["role"]
         self.last_deaths = [self.players[chosen]["name"]]
@@ -525,6 +651,18 @@ class WerewolfSoloGame:
         self.add_chat("Système",
                       f"{self.players[chosen]['name']} est éliminé ! C'était un {role_reveal}.",
                       False)
+        self.death_log.append({
+            "name":  self.players[chosen]["name"],
+            "role":  role_reveal,
+            "cause": "vote",
+            "round": self.day_count,
+        })
+        if role_reveal == "Chasseur":
+            self._trigger_hunter(chosen, lambda c=chosen: self._check_winner_day(c))
+        else:
+            self._check_winner_day(chosen)
+
+    def _check_winner_day(self, chosen: int):
         self.winner = check_winner(self.players)
         if self.winner:
             self.phase   = "end"
@@ -542,6 +680,32 @@ class WerewolfSoloGame:
     # ── Actions humaines ──────────────────────────────────────────────────────
 
     def apply_human_action(self):
+        # Cas spécial : Chasseur humain doit choisir sa cible
+        if self.hunter_pending:
+            if self.selected_target is None:
+                return
+            tid = self.selected_target
+            self.players[tid]["alive"]         = False
+            self.players[tid]["revealed_role"] = self.players[tid]["role"]
+            self.add_chat("Système",
+                          f"Le Chasseur emporte {self.players[tid]['name']} dans la mort !",
+                          False)
+            self.last_deaths.append(self.players[tid]["name"])
+            self.death_log.append({
+                "name":  self.players[tid]["name"],
+                "role":  self.players[tid]["role"],
+                "cause": "chasseur",
+                "round": self.day_count,
+            })
+            self.hunter_pending = False
+            self.selected_target = None
+            done = self.hunter_pending_done
+            self.hunter_pending_done = None
+            self.is_animating = True
+            self.action_hint  = ""
+            done()
+            return
+
         role = self.current_role()
         if self.phase == "day":
             if self.selected_target is None:
@@ -559,7 +723,7 @@ class WerewolfSoloGame:
         if is_wolf_role(role):
             self.pending_night["wolf_target"] = self.selected_target
             self.night_target_name = self.players[self.selected_target]["name"]
-            self.night_msg(f"Tu as désigné ta victime.")
+            self.night_msg("Tu as désigné ta victime.")
         elif role == "Voyante":
             self.pending_night["seer_done"] = True
             tgt = self.selected_target
@@ -593,6 +757,171 @@ class WerewolfSoloGame:
         self.pending_night["witch_done"] = True
         self.selected_target = None
         self._resume_after_human()
+
+    # ── Narration fin de partie ───────────────────────────────────────────────
+
+    def _build_narrative(self) -> str:
+        wolves = [p for p in self.players if is_wolf_role(p["role"])]
+        seer   = next((p for p in self.players if p["role"] == "Voyante"), None)
+        witch  = next((p for p in self.players if p["role"] == "Sorcière"), None)
+        hunter = next((p for p in self.players if p["role"] == "Chasseur"), None)
+
+        lines = []
+
+        wolf_names = [p["name"] for p in wolves]
+        if len(wolf_names) == 1:
+            was = "était" if not wolves[0]["alive"] else "est"
+            lines.append(f"{wolf_names[0]} {was} le loup tapi dans l'ombre depuis le début.")
+        elif len(wolf_names) > 1:
+            lines.append(f"{', '.join(wolf_names)} formaient la meute secrète du village.")
+
+        if seer:
+            lines.append(f"{seer['name']} incarnait la Voyante, gardienne des secrets de la nuit.")
+        if witch:
+            lines.append(f"{witch['name']} détenait les potions de la Sorcière.")
+        if hunter:
+            lines.append(f"{hunter['name']} était le Chasseur, prêt à emporter un ennemi dans la mort.")
+
+        cause_txt = {
+            "loup":     "dévoré par les loups",
+            "poison":   "empoisonné par la Sorcière",
+            "vote":     "chassé par le village",
+            "chasseur": "emporté par le Chasseur",
+        }
+        if self.death_log:
+            first = self.death_log[0]
+            lines.append(
+                f"Première victime : {first['name']} ({first['role']}), "
+                f"{cause_txt.get(first['cause'], 'éliminé')} "
+                f"lors de la nuit {first['round']}."
+            )
+
+        if self.winner == "Village":
+            lines.append("Le village a triomphé et chassé la menace des ténèbres.")
+        elif self.winner == "Loups":
+            lines.append("Les loups ont semé la terreur et pris le contrôle du village.")
+
+        return "  ".join(lines)
+
+    # ── Écran de fin détaillé ────────────────────────────────────────────────
+
+    def _draw_end_screen(self):
+        w, h = self.screen.get_size()
+        f = self.fonts()
+
+        # Fond sombre
+        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+        overlay.fill((8, 4, 18, 215))
+        self.screen.blit(overlay, (0, 0))
+
+        # Titre vainqueur
+        winner_col = WOLF_RED if self.winner == "Loups" else BTN_SUCCESS_H
+        title_y = int(h * 0.09)
+        draw_text(self.screen, f"Victoire du camp : {self.winner} !",
+                  f["title"], winner_col,
+                  center=(w // 2, title_y), shadow=True)
+
+        # Sous-titre
+        draw_text(self.screen, "— Révélation des rôles —",
+                  f["small"], GREY_DIM,
+                  center=(w // 2, title_y + 52))
+
+        # Grille de cartes joueurs
+        n = len(self.players)
+        cols = min(5, n)
+        rows = math.ceil(n / cols)
+        card_w = min(148, max(100, (w - 80) // cols - 10))
+        card_h = 96
+        grid_w = cols * (card_w + 8)
+        grid_x = (w - grid_w) // 2
+        grid_y = title_y + 82
+
+        for i, p in enumerate(self.players):
+            col = i % cols
+            row = i // cols
+            cx = grid_x + col * (card_w + 8)
+            cy = grid_y + row * (card_h + 10)
+
+            role = p["role"]
+            camp = ROLE_CATALOG.get(role, {}).get("camp", "?")
+            is_wolf = is_wolf_role(role)
+            is_solo = camp == "Solo"
+
+            if is_wolf:
+                accent = WOLF_RED
+            elif is_solo:
+                accent = MIST_LIGHT
+            else:
+                accent = (50, 140, 200)
+
+            # Fond de carte
+            card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+            r, g, b = accent
+            fill_alpha = 55 if p["alive"] else 25
+            card_surf.fill((r, g, b, fill_alpha))
+            border_alpha = 200 if p["alive"] else 90
+            pygame.draw.rect(card_surf, (r, g, b, border_alpha),
+                             (0, 0, card_w, card_h), 2, border_radius=12)
+            self.screen.blit(card_surf, (cx, cy))
+
+            cx_center = cx + card_w // 2
+
+            # Badge rôle (icône 2 lettres)
+            icon = ROLE_CATALOG.get(role, {}).get("ui_icon", role[:2].upper())
+            badge = pygame.Rect(cx + card_w // 2 - 18, cy + 6, 36, 24)
+            badge_surf = pygame.Surface((36, 24), pygame.SRCALPHA)
+            badge_surf.fill((r, g, b, 180 if p["alive"] else 80))
+            pygame.draw.rect(badge_surf, (r, g, b, 220), (0, 0, 36, 24), 1, border_radius=6)
+            self.screen.blit(badge_surf, badge.topleft)
+            draw_text(self.screen, icon, f["xs"], WHITE_SOFT, center=badge.center)
+
+            name_col = WHITE_SOFT if p["alive"] else GREY_DIM
+            draw_text(self.screen, p["name"], f["xs"], name_col,
+                      center=(cx_center, cy + 38))
+
+            draw_text(self.screen, role, f["xs"], accent,
+                      center=(cx_center, cy + 56))
+
+            draw_text(self.screen, camp, f["xs"], GREY_DIM,
+                      center=(cx_center, cy + 72))
+
+            if not p["alive"]:
+                dead_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+                dead_surf.fill((0, 0, 0, 60))
+                self.screen.blit(dead_surf, (cx, cy))
+                draw_text(self.screen, "✗", f["xs"], WOLF_RED,
+                          center=(cx + card_w - 14, cy + 14))
+            elif p["id"] == self.player_id:
+                draw_text(self.screen, "MOI", f["xs"], GOLD_WARM,
+                          center=(cx + card_w - 18, cy + 14))
+
+        # Panneau narratif
+        narr_y = grid_y + rows * (card_h + 10) + 14
+        narr_h = max(60, h - narr_y - 90)
+        narr_rect = pygame.Rect(40, narr_y, w - 80, narr_h)
+
+        narr_surf = pygame.Surface((narr_rect.w, narr_rect.h), pygame.SRCALPHA)
+        narr_surf.fill((20, 14, 40, 180))
+        pygame.draw.rect(narr_surf, (80, 60, 130, 120),
+                         (0, 0, narr_rect.w, narr_rect.h), 1, border_radius=10)
+        self.screen.blit(narr_surf, narr_rect.topleft)
+
+        narrative = self._build_narrative()
+        chars_per_line = max(20, (narr_rect.w - 24) // 8)
+        ny = narr_y + 8
+        for line in wrap_text(narrative, chars_per_line):
+            if ny + 16 > narr_y + narr_h - 6:
+                break
+            draw_text(self.screen, line, f["xs"], MOON_SILVER,
+                      topleft=(narr_rect.x + 12, ny))
+            ny += 16
+
+        # Bouton Nouvelle Partie centré
+        btn_w = 260
+        btn_rect = (w // 2 - btn_w // 2, h - 72, btn_w, 48)
+        self.btn_restart.set_rect(btn_rect)
+        mouse = pygame.mouse.get_pos()
+        self.btn_restart.draw(self.screen, f["small"], mouse)
 
     # ── Dessin ────────────────────────────────────────────────────────────────
 
@@ -709,7 +1038,6 @@ class WerewolfSoloGame:
                          width=2, border_radius=22)
         self.screen.blit(panel, self.right_rect.topleft)
 
-        # En-tête phase
         phase_labels = {
             "night": (f"Nuit {self.day_count}", MOON_SILVER),
             "day":   (f"Jour {self.day_count}",  GOLD_WARM),
@@ -719,7 +1047,6 @@ class WerewolfSoloGame:
         draw_text(self.screen, ph_text, f["big"], ph_col,
                   topleft=(self.right_rect.x + 20, self.right_rect.y + 12), shadow=True)
 
-        # Badge rôle + indicateur animation
         role = self.current_role()
         rb   = pygame.Rect(self.right_rect.x + 20, self.right_rect.y + 58, 130, 30)
         pygame.draw.rect(self.screen, _role_badge_col(role), rb, border_radius=14)
@@ -730,7 +1057,7 @@ class WerewolfSoloGame:
                       topleft=(rb.right + 12, self.right_rect.y + 64))
 
         y = self.right_rect.y + 102
-        chat_reserve = 220  # px réservés en bas pour chat + boutons
+        chat_reserve = 220
 
         def line(txt, col):
             nonlocal y
@@ -746,13 +1073,13 @@ class WerewolfSoloGame:
 
         line(self.message, WHITE_SOFT)
         if self.action_hint:
-            line(self.action_hint, GOLD_PALE)
+            hint_col = WOLF_RED if self.hunter_pending else GOLD_PALE
+            line(self.action_hint, hint_col)
         if self.seer_result:
             line(self.seer_result, CYAN_COOL)
         if self.last_deaths:
             line("Éliminés : " + ", ".join(self.last_deaths), WOLF_RED)
 
-        # Log de nuit (messages séquentiels)
         if self.phase == "night" and self.night_log:
             sep_y = y + 4
             if sep_y < self.right_rect.bottom - chat_reserve:
@@ -767,7 +1094,7 @@ class WerewolfSoloGame:
                           topleft=(self.right_rect.x + 20, y))
                 y += 17
 
-        # ── Chat log ─────────────────────────────────────────────────────────
+        # Chat log
         chat_top = self.right_rect.bottom - 215
         chat_bot = self.right_rect.bottom - 68
         chat_h   = chat_bot - chat_top
@@ -803,8 +1130,9 @@ class WerewolfSoloGame:
 
         # Boutons
         mouse = pygame.mouse.get_pos()
-        if self.phase == "end":
-            self.btn_restart.draw(self.screen, f["small"], mouse)
+        if self.hunter_pending:
+            can_act = self.selected_target is not None
+            self.btn_hunter.draw(self.screen, f["small"], mouse, enabled=can_act)
         else:
             can_act = self.human_can_act() and self.selected_target is not None
             self.btn_vote.draw(self.screen, f["small"], mouse, enabled=can_act)
@@ -824,12 +1152,18 @@ class WerewolfSoloGame:
         draw_text(self.screen, "LOUP-GAROU  —  MODE SOLO",
                   f["title"], MOON_SILVER,
                   center=(self.top_rect.centerx, self.top_rect.centery), shadow=True)
-        self.draw_player_list()
-        self.draw_info_panel()
-        hint = ("En attente des IA..." if self.is_animating
-                else "Clique sur un joueur vivant pour le cibler")
-        draw_text(self.screen, hint, f["xs"], GREY_DIM,
-                  center=self.bottom_rect.center)
+
+        if self.phase == "end":
+            self._draw_end_screen()
+        else:
+            self.draw_player_list()
+            self.draw_info_panel()
+            hint = ("En attente des IA..." if self.is_animating
+                    else ("Clique sur un joueur vivant pour le cibler"
+                          if not self.hunter_pending
+                          else "Chasseur : choisis ta cible puis clique sur EMPORTER"))
+            draw_text(self.screen, hint, f["xs"], GREY_DIM,
+                      center=self.bottom_rect.center)
 
     # ── Événements ───────────────────────────────────────────────────────────
 
@@ -841,14 +1175,22 @@ class WerewolfSoloGame:
             return
         if event.type != pygame.MOUSEBUTTONDOWN:
             return
+
         for pid, rect in self.player_rects:
             if rect.collidepoint(event.pos):
-                if pid != self.player_id and self.players[pid]["alive"] and not self.is_animating:
+                can_click = (pid != self.player_id
+                             and self.players[pid]["alive"]
+                             and (not self.is_animating or self.hunter_pending))
+                if can_click:
                     self.selected_target = pid
                 return
+
         if self.phase == "end":
             if self.btn_restart.is_clicked(event.pos):
                 self.setup_game()
+        elif self.hunter_pending:
+            if self.btn_hunter.is_clicked(event.pos):
+                self.apply_human_action()
         elif not self.is_animating:
             if self.btn_vote.is_clicked(event.pos):
                 self.apply_human_action()
