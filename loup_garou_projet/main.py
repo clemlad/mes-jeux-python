@@ -1,5 +1,16 @@
+"""
+main.py – Lanceur principal Loup-Garou
+CORRECTIONS :
+  - restore_window() appelle clear_font_cache() pour invalider les fonts après pygame.quit()
+  - Les sous-jeux NE font plus pygame.quit() (seulement pygame.display.quit)
+  - create_server() attend confirmation que le serveur est bien bindé
+  - Fond forestier animé avec lune, étoiles, brume, arbres
+"""
 import threading
 import time
+import math
+import random
+
 import pygame
 
 from loup_garou_online import WerewolfOnlineGame
@@ -7,412 +18,449 @@ from loup_garou_solo import WerewolfSoloGame
 from loup_server import WerewolfServer
 from loup_shared import MIN_PLAYERS, MAX_PLAYERS
 from server_discovery import ServerDiscovery
+from loup_ui_theme import (
+    BG_DEEP, BG_TOP, BG_BOTTOM, BG_MID,
+    MOON_SILVER, MOON_GLOW,
+    WOLF_RED, MIST_PURPLE, MIST_LIGHT,
+    GOLD_WARM, GOLD_PALE,
+    CYAN_COOL, WHITE_SOFT, GREY_DIM,
+    BTN_PRIMARY, BTN_PRIMARY_H,
+    BTN_DANGER, BTN_DANGER_H,
+    BTN_SUCCESS, BTN_SUCCESS_H,
+    BTN_NEUTRAL, BTN_NEUTRAL_H,
+    BTN_BORDER,
+    draw_gradient_bg, draw_glass_panel, draw_text, wrap_text,
+    draw_moon, draw_tree_silhouette,
+    ParticleSystem, Button, InputBox, Stepper,
+    scaled_fonts, clear_font_cache,
+)
 
 BASE_W, BASE_H = 1100, 760
-MIN_W, MIN_H = 900, 680
-BG_TOP = (18, 16, 36)
-BG_BOTTOM = (56, 32, 70)
-WHITE = (240, 240, 245)
-CYAN = (135, 205, 235)
-PANEL_FILL = (12, 10, 26, 220)
-PANEL_BORDER = (120, 110, 160, 110)
-BUTTON_BORDER = (200, 190, 230)
-GREEN = (80, 120, 90)
-GREEN_H = (100, 145, 110)
-BLUE = (70, 80, 125)
-BLUE_H = (95, 100, 155)
-RED = (125, 62, 80)
-RED_H = (150, 82, 102)
-PURPLE = (96, 74, 140)
-PURPLE_H = (118, 96, 168)
+MIN_W,  MIN_H  = 900,  660
 
 
-class Button:
-    def __init__(self, text, color, hover):
-        self.text = text
-        self.color = color
-        self.hover = hover
-        self.rect = pygame.Rect(0, 0, 0, 0)
+# ── Fond forestier animé ─────────────────────────────────────────────────────
 
-    def set_rect(self, rect):
-        self.rect = pygame.Rect(rect)
-
-    def draw(self, surface, font, mouse_pos):
-        color = self.hover if self.rect.collidepoint(mouse_pos) else self.color
-        pygame.draw.rect(surface, color, self.rect, border_radius=14)
-        pygame.draw.rect(surface, BUTTON_BORDER, self.rect, 2, border_radius=14)
-        img = font.render(self.text, True, WHITE)
-        surface.blit(img, img.get_rect(center=self.rect.center))
-
-    def is_clicked(self, pos):
-        return self.rect.collidepoint(pos)
+_STARS = None
+_STARS_SIZE = (0, 0)
 
 
-class InputBox:
-    def __init__(self, text="", placeholder=""):
-        self.rect = pygame.Rect(0, 0, 0, 0)
-        self.text = text
-        self.active = False
-        self.placeholder = placeholder
-
-    def set_rect(self, rect):
-        self.rect = pygame.Rect(rect)
-
-    def draw(self, surface, font):
-        color = (40, 30, 62) if self.active else (26, 20, 46)
-        pygame.draw.rect(surface, color, self.rect, border_radius=14)
-        pygame.draw.rect(surface, CYAN if self.active else BUTTON_BORDER, self.rect, 2, border_radius=14)
-        display = self.text or self.placeholder
-        img = font.render(display, True, WHITE if self.text else (170, 180, 205))
-        surface.blit(img, (self.rect.x + 14, self.rect.centery - img.get_height() // 2))
-
-    def handle_event(self, event, max_len=20):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            self.active = self.rect.collidepoint(event.pos)
-        elif event.type == pygame.KEYDOWN and self.active:
-            if event.key == pygame.K_BACKSPACE:
-                self.text = self.text[:-1]
-            elif event.key != pygame.K_RETURN and len(self.text) < max_len and event.unicode.isprintable():
-                self.text += event.unicode
+def _init_stars(w, h):
+    global _STARS, _STARS_SIZE
+    if _STARS is None or _STARS_SIZE != (w, h):
+        _STARS = [(random.randint(0, w), random.randint(0, h * 55 // 100),
+                   random.uniform(0.5, 1.8), random.uniform(0, math.pi * 2))
+                  for _ in range(80)]
+        _STARS_SIZE = (w, h)
 
 
-class Stepper:
-    def __init__(self, label, value, minimum, maximum):
-        self.label = label
-        self.value = value
-        self.minimum = minimum
-        self.maximum = maximum
-        self.minus_btn = Button("-", RED, RED_H)
-        self.plus_btn = Button("+", GREEN, GREEN_H)
-        self.display_rect = pygame.Rect(0, 0, 0, 0)
-
-    def set_layout(self, x, y, width):
-        self.minus_btn.set_rect((x, y, 44, 42))
-        self.display_rect = pygame.Rect(x + 54, y, width - 108, 42)
-        self.plus_btn.set_rect((x + width - 44, y, 44, 42))
-
-    def draw(self, surface, font, small_font, mouse_pos):
-        self.minus_btn.draw(surface, font, mouse_pos)
-        self.plus_btn.draw(surface, font, mouse_pos)
-        pygame.draw.rect(surface, (26, 20, 46), self.display_rect, border_radius=12)
-        pygame.draw.rect(surface, BUTTON_BORDER, self.display_rect, 2, border_radius=12)
-        img = font.render(str(self.value), True, WHITE)
-        surface.blit(img, img.get_rect(center=self.display_rect.center))
-        draw_text(surface, self.label, small_font, CYAN, topleft=(self.display_rect.x, self.display_rect.y - 24))
-
-    def handle_click(self, pos):
-        if self.minus_btn.is_clicked(pos):
-            self.value = max(self.minimum, self.value - 1)
-            return True
-        if self.plus_btn.is_clicked(pos):
-            self.value = min(self.maximum, self.value + 1)
-            return True
-        return False
+def draw_forest_scene(surface: pygame.Surface, t: float):
+    w, h = surface.get_size()
+    draw_gradient_bg(surface, BG_DEEP, BG_BOTTOM)
+    _init_stars(w, h)
+    # Étoiles
+    for sx, sy, sr, sp in _STARS:
+        a = int(130 + 80 * math.sin(t * 0.7 + sp))
+        ss = pygame.Surface((6, 6), pygame.SRCALPHA)
+        pygame.draw.circle(ss, (210, 215, 255, a), (3, 3), max(1, int(sr)))
+        surface.blit(ss, (sx - 3, sy - 3))
+    # Lune
+    draw_moon(surface, int(w * 0.80), int(h * 0.16), int(min(w, h) * 0.07), t)
+    # Brume basse
+    for i in range(3):
+        mist = pygame.Surface((w, 36), pygame.SRCALPHA)
+        a = int(14 + 8 * math.sin(t * 0.4 + i))
+        for mx in range(w):
+            wave = int(5 * math.sin(mx / 90 + t * 0.25 + i))
+            pygame.draw.line(mist, (130, 110, 170, a), (mx, 18 + wave), (mx, 36 + wave))
+        surface.blit(mist, (0, h - 80 + i * 16))
+    # Arbres lointains
+    for xi, hi in [(0.03, 0.34), (0.11, 0.28), (0.19, 0.36), (0.27, 0.26),
+                   (0.62, 0.31), (0.71, 0.38), (0.81, 0.26), (0.93, 0.33)]:
+        draw_tree_silhouette(surface, int(xi * w), h, int(hi * h), (10, 8, 22))
+    # Arbres proches
+    for xi, hi in [(0.0, 0.46), (0.08, 0.40), (0.17, 0.48), (0.28, 0.42),
+                   (0.56, 0.44), (0.66, 0.50), (0.77, 0.46), (0.87, 0.42), (0.97, 0.48)]:
+        draw_tree_silhouette(surface, int(xi * w), h, int(hi * h), (5, 4, 12))
 
 
-def draw_vertical_gradient(surface, top_color, bottom_color):
-    width, height = surface.get_size()
-    for y in range(height):
-        ratio = y / max(1, height)
-        color = tuple(int(top_color[i] * (1 - ratio) + bottom_color[i] * ratio) for i in range(3))
-        pygame.draw.line(surface, color, (0, y), (width, y))
-
-
-def draw_glass_panel(surface, rect, radius=24):
-    panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-    pygame.draw.rect(panel, PANEL_FILL, (0, 0, rect.width, rect.height), border_radius=radius)
-    pygame.draw.rect(panel, PANEL_BORDER, (0, 0, rect.width, rect.height), width=1, border_radius=radius)
-    surface.blit(panel, rect.topleft)
-
-
-def draw_text(surface, text, font, color, center=None, topleft=None):
-    img = font.render(text, True, color)
-    rect = img.get_rect()
-    if center is not None:
-        rect.center = center
-    if topleft is not None:
-        rect.topleft = topleft
-    surface.blit(img, rect)
-    return rect
-
+# ── Lanceur ───────────────────────────────────────────────────────────────────
 
 class Launcher:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((BASE_W, BASE_H), pygame.RESIZABLE)
-        pygame.display.set_caption("Loup-Garou - Menu")
+        pygame.display.set_caption("Loup-Garou")
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = "main"
+        self.t = 0.0
+        self.particles = ParticleSystem(BASE_W, BASE_H, 45)
 
-        self.input_name = InputBox(placeholder="Entre ton nom")
-        self.main_solo_btn = Button("MODE SOLO", PURPLE, PURPLE_H)
-        self.main_online_btn = Button("MODE EN LIGNE", BLUE, BLUE_H)
-        self.quit_btn = Button("QUITTER", RED, RED_H)
-
-        self.online_create_btn = Button("CRÉER UN SERVEUR", GREEN, GREEN_H)
-        self.online_join_btn = Button("REJOINDRE UN SERVEUR", BLUE, BLUE_H)
-        self.solo_launch_btn = Button("LANCER LE SOLO", GREEN, GREEN_H)
-        self.back_btn = Button("RETOUR", RED, RED_H)
-
-        self.solo_players_stepper = Stepper("Nombre total de joueurs", 6, MIN_PLAYERS, 12)
+        self.input_name = InputBox(placeholder="Entre ton pseudonyme…", max_len=20)
+        self.btn_solo    = Button("MODE SOLO",       BTN_NEUTRAL,  BTN_NEUTRAL_H,  icon="🌙")
+        self.btn_online  = Button("MODE EN LIGNE",   BTN_PRIMARY,  BTN_PRIMARY_H,  icon="🐺")
+        self.btn_quit    = Button("QUITTER",          BTN_DANGER,   BTN_DANGER_H,   icon="✕")
+        self.btn_create  = Button("CREER UN SALON",   BTN_SUCCESS,  BTN_SUCCESS_H,  icon="⚔")
+        self.btn_join    = Button("REJOINDRE",         BTN_PRIMARY,  BTN_PRIMARY_H,  icon="🚪")
+        self.btn_back    = Button("RETOUR",            BTN_DANGER,   BTN_DANGER_H)
+        self.stepper     = Stepper("Nombre de joueurs (IA inclus)", 6, MIN_PLAYERS, 12)
+        self.btn_launch  = Button("LANCER LA PARTIE", BTN_SUCCESS,  BTN_SUCCESS_H,  icon="▶")
 
         self.discovery = ServerDiscovery()
         self.discovery.start()
-
-        self.message = f"Entre ton nom pour commencer. Minimum de joueurs : {MIN_PLAYERS}."
+        self.message       = ""
         self.hosted_server = None
-        self.host_thread = None
-        self.selected_index = 0
-        self.row_rects = []
+        self.host_thread   = None
+        self.selected_idx  = 0
+        self.row_rects: list = []
 
-    def fonts(self):
+    # ── Utilitaires ──────────────────────────────────────────────────────────
+
+    def fonts(self) -> dict:
         w, h = self.screen.get_size()
-        scale = min(w / BASE_W, h / BASE_H)
-        return {
-            "small": pygame.font.SysFont("arial", max(18, int(22 * scale))),
-            "medium": pygame.font.SysFont("arial", max(24, int(30 * scale))),
-            "big": pygame.font.SysFont("arial", max(36, int(52 * scale))),
-        }
+        return scaled_fonts(w, h, BASE_W, BASE_H)
 
-    def valid_name(self):
+    def valid_name(self) -> str:
         return self.input_name.text.strip()[:20]
 
-    def ensure_name(self):
+    def ensure_name(self) -> bool:
         if not self.valid_name():
-            self.message = "Tu dois entrer un nom avant de continuer."
+            self.message = "⚠  Choisis un pseudonyme avant de continuer."
             return False
         return True
 
-    def reset_menu_state(self):
+    def reset_state(self):
         self.state = "main"
-        self.selected_index = 0
+        self.selected_idx = 0
         self.row_rects = []
-        self.message = "Retour au menu principal."
+        self.message = ""
 
-    def restore_window(self, size):
+    def restore_window(self, size: tuple):
+        """Recrée la fenêtre pygame proprement après un sous-jeu."""
+        # Les sous-jeux appellent pygame.display.quit() mais pas pygame.quit()
+        # On réinitialise seulement si nécessaire
         if not pygame.get_init():
             pygame.init()
         if not pygame.display.get_init():
             pygame.display.init()
+        if not pygame.font.get_init():
+            pygame.font.init()
+        # Invalider le cache de fonts car pygame.font a pu être réinitialisé
+        clear_font_cache()
         self.screen = pygame.display.set_mode(size, pygame.RESIZABLE)
-        pygame.display.set_caption("Loup-Garou - Menu")
+        pygame.display.set_caption("Loup-Garou")
         self.clock = pygame.time.Clock()
         pygame.event.clear()
 
-    def launch_online_game(self, host, shutdown_server_after=False):
-        current_size = self.screen.get_size()
+    # ── Lancements ───────────────────────────────────────────────────────────
+
+    def launch_online_game(self, host: str, shutdown_after: bool = False):
+        sz = self.screen.get_size()
+        error_msg = ""
         try:
             game = WerewolfOnlineGame(host, self.valid_name())
             game.run()
         except Exception as e:
-            self.message = f"Erreur pendant la partie : {e}"
-        self.restore_window(current_size)
-        if shutdown_server_after and self.hosted_server is not None:
+            error_msg = f"Erreur connexion : {e}"
+        self.restore_window(sz)
+        if shutdown_after and self.hosted_server is not None:
             try:
                 self.hosted_server.shutdown()
             except Exception:
                 pass
             self.hosted_server = None
-            self.host_thread = None
-        self.reset_menu_state()
+            self.host_thread   = None
+        self.reset_state()
+        if error_msg:
+            self.message = error_msg
 
     def launch_solo_game(self):
-        current_size = self.screen.get_size()
+        sz = self.screen.get_size()
+        error_msg = ""
         try:
-            game = WerewolfSoloGame(self.valid_name(), self.solo_players_stepper.value, None)
+            game = WerewolfSoloGame(self.valid_name(), self.stepper.value, None)
             game.run()
         except Exception as e:
-            self.message = f"Erreur en solo : {e}"
-        self.restore_window(current_size)
-        self.reset_menu_state()
+            error_msg = f"Erreur solo : {e}"
+        self.restore_window(sz)
+        self.reset_state()
+        if error_msg:
+            self.message = error_msg
 
     def create_server(self):
+        """Crée le serveur, attend qu'il soit prêt, puis lance le jeu en hôte."""
         if self.hosted_server is not None:
             try:
                 self.hosted_server.shutdown()
             except Exception:
                 pass
             self.hosted_server = None
-            self.host_thread = None
-        self.hosted_server = WerewolfServer(
+            self.host_thread   = None
+
+        ready_event = threading.Event()
+        server = WerewolfServer(
             host_name=self.valid_name(),
             max_players=MAX_PLAYERS,
             role_config=None,
+            ready_event=ready_event,
         )
-        self.host_thread = threading.Thread(target=self.hosted_server.serve_forever, daemon=True)
+        self.hosted_server = server
+        self.host_thread = threading.Thread(target=server.serve_forever, daemon=True)
         self.host_thread.start()
-        time.sleep(0.4)
-        self.launch_online_game("127.0.0.1", shutdown_server_after=True)
 
-    def join_selected_server(self):
+        # Attendre que le serveur soit bindé (max 3 secondes)
+        if not ready_event.wait(timeout=3.0) or not server.bind_ok:
+            self.message = "Impossible de démarrer le serveur (port occupé ?)."
+            self.hosted_server = None
+            self.host_thread   = None
+            return
+
+        self.launch_online_game("127.0.0.1", shutdown_after=True)
+
+    def join_selected(self):
         servers = self.discovery.get_servers()
         if not servers:
-            self.message = "Aucun serveur trouvé sur le réseau local."
+            self.message = "Aucun salon trouvé sur le réseau local."
             return
-        self.selected_index = max(0, min(self.selected_index, len(servers) - 1))
-        host = servers[self.selected_index]["host"]
-        self.launch_online_game(host, shutdown_server_after=False)
+        self.selected_idx = max(0, min(self.selected_idx, len(servers) - 1))
+        host = servers[self.selected_idx]["host"]
+        self.launch_online_game(host, shutdown_after=False)
 
-    def main_layout(self):
-        w, h = self.screen.get_size()
-        panel = pygame.Rect(w // 2 - 330, h // 2 - 230, 660, 460)
-        self.input_name.set_rect((panel.x + 120, panel.y + 110, 420, 50))
-        self.main_solo_btn.set_rect((panel.x + 120, panel.y + 200, 420, 54))
-        self.main_online_btn.set_rect((panel.x + 120, panel.y + 278, 420, 54))
-        self.quit_btn.set_rect((panel.x + 120, panel.y + 356, 420, 50))
-        return panel
+    # ── Layout ───────────────────────────────────────────────────────────────
 
-    def online_layout(self):
+    def _center_panel(self, pw: int = 600, ph: int = 500) -> pygame.Rect:
         w, h = self.screen.get_size()
-        panel = pygame.Rect(w // 2 - 330, h // 2 - 220, 660, 440)
-        self.online_create_btn.set_rect((panel.x + 120, panel.y + 178, 420, 58))
-        self.online_join_btn.set_rect((panel.x + 120, panel.y + 258, 420, 58))
-        self.back_btn.set_rect((panel.x + 120, panel.y + 338, 420, 48))
-        return panel
+        return pygame.Rect(w // 2 - pw // 2, h // 2 - ph // 2, pw, ph)
 
-    def join_layout(self):
-        w, h = self.screen.get_size()
-        panel = pygame.Rect(60, 50, w - 120, h - 130)
-        self.back_btn.set_rect((panel.x, panel.bottom + 14, 160, 42))
-        return panel
+    def layout_main(self) -> pygame.Rect:
+        p = self._center_panel(580, 480)
+        bw, bh = p.width - 100, 54
+        bx = p.x + 50
+        self.input_name.set_rect((bx, p.y + 130, bw, 50))
+        self.btn_solo.set_rect  ((bx, p.y + 210, bw, bh))
+        self.btn_online.set_rect((bx, p.y + 282, bw, bh))
+        self.btn_quit.set_rect  ((bx, p.y + 374, bw, 46))
+        return p
 
-    def solo_layout(self):
+    def layout_online(self) -> pygame.Rect:
+        p = self._center_panel(580, 390)
+        bw, bh = p.width - 100, 56
+        bx = p.x + 50
+        self.btn_create.set_rect((bx, p.y + 160, bw, bh))
+        self.btn_join.set_rect  ((bx, p.y + 236, bw, bh))
+        self.btn_back.set_rect  ((bx, p.y + 318, bw, 46))
+        return p
+
+    def layout_solo(self) -> pygame.Rect:
+        p = self._center_panel(580, 460)
+        bw = p.width - 100
+        bx = p.x + 50
+        self.stepper.set_layout(bx, p.y + 190, bw)
+        self.btn_launch.set_rect((bx, p.y + 300, bw, 54))
+        self.btn_back.set_rect  ((bx, p.y + 376, bw, 46))
+        return p
+
+    def layout_join(self) -> pygame.Rect:
         w, h = self.screen.get_size()
-        panel = pygame.Rect(w // 2 - 330, h // 2 - 230, 660, 460)
-        self.solo_players_stepper.set_layout(panel.x + 100, panel.y + 180, 460)
-        self.solo_launch_btn.set_rect((panel.x + 100, panel.y + 300, 460, 52))
-        self.back_btn.set_rect((panel.x + 100, panel.y + 372, 460, 46))
-        return panel
+        p = pygame.Rect(60, 50, w - 120, h - 120)
+        self.btn_back.set_rect((p.x, p.bottom + 10, 180, 42))
+        return p
+
+    # ── Dessin ───────────────────────────────────────────────────────────────
+
+    def _logo(self, panel: pygame.Rect, f: dict):
+        cx = panel.centerx
+        lw = panel.width // 3
+        pygame.draw.line(self.screen, GOLD_WARM,
+                         (cx - lw // 2, panel.y + 42), (cx + lw // 2, panel.y + 42), 1)
+        draw_text(self.screen, "LOUP-GAROU", f["title"], MOON_SILVER,
+                  center=(cx, panel.y + 74), shadow=True)
+        pygame.draw.line(self.screen, GOLD_WARM,
+                         (cx - lw // 2, panel.y + 108), (cx + lw // 2, panel.y + 108), 1)
 
     def draw_main(self):
         f = self.fonts()
-        panel = self.main_layout()
-        draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "LOUP-GAROU", f["big"], WHITE, center=(panel.centerx, panel.y + 56))
-        draw_text(self.screen, "Choisis ton pseudo", f["medium"], CYAN, center=(panel.centerx, panel.y + 88))
+        p = self.layout_main()
+        draw_glass_panel(self.screen, p, radius=24)
+        self._logo(p, f)
+        draw_text(self.screen, "Choisis ton pseudonyme", f["small"], GOLD_PALE,
+                  center=(p.centerx, p.y + 118))
         self.input_name.draw(self.screen, f["medium"])
         mouse = pygame.mouse.get_pos()
-        self.main_solo_btn.draw(self.screen, f["medium"], mouse)
-        self.main_online_btn.draw(self.screen, f["medium"], mouse)
-        self.quit_btn.draw(self.screen, f["medium"], mouse)
-        draw_text(self.screen, self.message, f["small"], WHITE, center=(panel.centerx, panel.bottom + 28))
+        self.btn_solo.draw  (self.screen, f["medium"], mouse)
+        self.btn_online.draw(self.screen, f["medium"], mouse)
+        self.btn_quit.draw  (self.screen, f["medium"], mouse)
+        if self.message:
+            draw_text(self.screen, self.message, f["small"], WOLF_RED,
+                      center=(p.centerx, p.bottom + 28))
 
     def draw_online(self):
         f = self.fonts()
-        panel = self.online_layout()
-        draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "MODE EN LIGNE", f["big"], WHITE, center=(panel.centerx, panel.y + 68))
-        draw_text(self.screen, "Le nombre de joueurs et les rôles se règlent directement dans le lobby du serveur.", f["small"], CYAN, center=(panel.centerx, panel.y + 118))
-        draw_text(self.screen, "Crée simplement un salon ou rejoins-en un existant.", f["small"], WHITE, center=(panel.centerx, panel.y + 148))
+        p = self.layout_online()
+        draw_glass_panel(self.screen, p, radius=24)
+        draw_text(self.screen, "MODE EN LIGNE", f["big"], MOON_SILVER,
+                  center=(p.centerx, p.y + 52), shadow=True)
+        draw_text(self.screen,
+                  "Crée un salon ou rejoins-en un sur le réseau local.",
+                  f["small"], GOLD_PALE, center=(p.centerx, p.y + 100))
+        draw_text(self.screen,
+                  "Les rôles se configurent dans le lobby.",
+                  f["xs"] if "xs" in f else f["small"], GREY_DIM,
+                  center=(p.centerx, p.y + 128))
         mouse = pygame.mouse.get_pos()
-        self.online_create_btn.draw(self.screen, f["medium"], mouse)
-        self.online_join_btn.draw(self.screen, f["medium"], mouse)
-        self.back_btn.draw(self.screen, f["medium"], mouse)
+        self.btn_create.draw(self.screen, f["medium"], mouse)
+        self.btn_join.draw  (self.screen, f["medium"], mouse)
+        self.btn_back.draw  (self.screen, f["medium"], mouse)
 
     def draw_solo(self):
         f = self.fonts()
-        panel = self.solo_layout()
-        draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "MODE SOLO", f["big"], WHITE, center=(panel.centerx, panel.y + 70))
-        draw_text(self.screen, f"Tu joues contre des IA sur la même machine. Minimum : {MIN_PLAYERS} joueurs.", f["small"], CYAN, center=(panel.centerx, panel.y + 120))
-        self.solo_players_stepper.draw(self.screen, f["medium"], f["small"], pygame.mouse.get_pos())
-        self.solo_launch_btn.draw(self.screen, f["medium"], pygame.mouse.get_pos())
-        self.back_btn.draw(self.screen, f["medium"], pygame.mouse.get_pos())
+        p = self.layout_solo()
+        draw_glass_panel(self.screen, p, radius=24)
+        draw_text(self.screen, "MODE SOLO", f["big"], MOON_SILVER,
+                  center=(p.centerx, p.y + 52), shadow=True)
+        draw_text(self.screen,
+                  f"Tu joues contre des IA – minimum {MIN_PLAYERS} joueurs",
+                  f["small"], GOLD_PALE, center=(p.centerx, p.y + 100))
+        draw_text(self.screen,
+                  "Rôles classiques (loup, voyante, sorcière) attribués automatiquement.",
+                  f["xs"] if "xs" in f else f["small"], GREY_DIM,
+                  center=(p.centerx, p.y + 132))
+        mouse = pygame.mouse.get_pos()
+        self.stepper.draw   (self.screen, f["medium"], f["small"], mouse)
+        self.btn_launch.draw(self.screen, f["medium"], mouse)
+        self.btn_back.draw  (self.screen, f["medium"], mouse)
 
     def draw_join(self):
         f = self.fonts()
-        panel = self.join_layout()
-        draw_glass_panel(self.screen, panel)
-        draw_text(self.screen, "Serveurs disponibles", f["big"], WHITE, center=(panel.centerx, panel.y + 46))
+        p = self.layout_join()
+        draw_glass_panel(self.screen, p, radius=22)
+        draw_text(self.screen, "Salons disponibles", f["big"], MOON_SILVER,
+                  center=(p.centerx, p.y + 44), shadow=True)
         self.row_rects = []
-        y = panel.y + 100
         servers = self.discovery.get_servers()
+        y = p.y + 90
         if not servers:
-            draw_text(self.screen, "Aucun serveur trouvé.", f["medium"], WHITE, center=panel.center)
+            draw_text(self.screen, "Aucun salon trouvé sur le réseau local…",
+                      f["medium"], GREY_DIM, center=(p.centerx, p.centery))
         else:
-            self.selected_index = max(0, min(self.selected_index, len(servers) - 1))
-            for i, server in enumerate(servers):
-                rect = pygame.Rect(panel.x + 24, y, panel.width - 48, 74)
-                color = (80, 52, 100) if i == self.selected_index else (36, 28, 56)
-                pygame.draw.rect(self.screen, color, rect, border_radius=14)
-                pygame.draw.rect(self.screen, BUTTON_BORDER, rect, 1, border_radius=14)
-                draw_text(self.screen, server["name"], f["medium"], WHITE, topleft=(rect.x + 18, rect.y + 8))
-                draw_text(self.screen, f"{server['players']}/{server['max_players']} joueurs - {server['host']}", f["small"], CYAN, topleft=(rect.x + 18, rect.y + 34))
-                draw_text(self.screen, f"Rôles : {server.get('roles', 'non précisés')}", f["small"], WHITE, topleft=(rect.x + 18, rect.y + 54))
-                self.row_rects.append((i, rect))
-                y += 84
-        self.back_btn.draw(self.screen, f["small"], pygame.mouse.get_pos())
+            self.selected_idx = max(0, min(self.selected_idx, len(servers) - 1))
+            for i, srv in enumerate(servers):
+                sel = (i == self.selected_idx)
+                row = pygame.Rect(p.x + 18, y, p.width - 36, 82)
+                pygame.draw.rect(self.screen, (58, 38, 88) if sel else (26, 18, 46),
+                                 row, border_radius=16)
+                pygame.draw.rect(self.screen, MIST_LIGHT if sel else (52, 42, 78),
+                                 row, 2, border_radius=16)
+                draw_text(self.screen, srv["name"], f["medium"], MOON_SILVER,
+                          topleft=(row.x + 60, row.y + 10))
+                draw_text(self.screen,
+                          f"{srv['players']}/{srv['max_players']} joueurs  •  {srv['host']}",
+                          f["small"], CYAN_COOL, topleft=(row.x + 60, row.y + 36))
+                draw_text(self.screen,
+                          f"Roles : {srv.get('roles', '')}",
+                          f["xs"] if "xs" in f else f["small"], GREY_DIM,
+                          topleft=(row.x + 60, row.y + 58))
+                # Icône
+                draw_text(self.screen, "🌕", f["big"], GOLD_WARM,
+                          center=(row.x + 34, row.centery))
+                if sel:
+                    draw_text(self.screen, "▶ Cliquer pour rejoindre", f["small"],
+                              GOLD_WARM, topleft=(row.right - 200, row.y + 30))
+                self.row_rects.append((i, row))
+                y += 92
+        mouse = pygame.mouse.get_pos()
+        self.btn_back.draw(self.screen, f["small"], mouse)
+        draw_text(self.screen, "Haut/Bas pour naviguer  •  Entree pour rejoindre",
+                  f["xs"] if "xs" in f else f["small"], GREY_DIM,
+                  center=(p.centerx, p.bottom + 20))
+        if self.message:
+            draw_text(self.screen, self.message, f["small"], WOLF_RED,
+                      center=(p.centerx, p.bottom + 40))
 
-    def handle_main_event(self, event):
+    # ── Événements ───────────────────────────────────────────────────────────
+
+    def handle_main(self, event):
         self.input_name.handle_event(event)
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.main_solo_btn.is_clicked(event.pos):
+            if self.btn_solo.is_clicked(event.pos):
                 if self.ensure_name():
                     self.state = "solo"
-            elif self.main_online_btn.is_clicked(event.pos):
+            elif self.btn_online.is_clicked(event.pos):
                 if self.ensure_name():
                     self.state = "online"
-            elif self.quit_btn.is_clicked(event.pos):
+            elif self.btn_quit.is_clicked(event.pos):
+                self.running = False
+
+    def handle_online(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.btn_create.is_clicked(event.pos):
                 if self.ensure_name():
-                    self.running = False
+                    self.create_server()
+            elif self.btn_join.is_clicked(event.pos):
+                if self.ensure_name():
+                    self.state = "join"
+                    self.selected_idx = 0
+            elif self.btn_back.is_clicked(event.pos):
+                self.reset_state()
 
-    def handle_online_event(self, event):
+    def handle_solo(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.online_create_btn.is_clicked(event.pos):
-                self.create_server()
-            elif self.online_join_btn.is_clicked(event.pos):
-                self.state = "join"
-                self.selected_index = 0
-            elif self.back_btn.is_clicked(event.pos):
-                self.reset_menu_state()
-
-    def handle_solo_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            self.solo_players_stepper.handle_click(event.pos)
-            if self.solo_launch_btn.is_clicked(event.pos):
+            self.stepper.handle_click(event.pos)
+            if self.btn_launch.is_clicked(event.pos):
                 self.launch_solo_game()
-            elif self.back_btn.is_clicked(event.pos):
-                self.reset_menu_state()
+            elif self.btn_back.is_clicked(event.pos):
+                self.reset_state()
 
-    def handle_join_event(self, event):
+    def handle_join(self, event):
         servers = self.discovery.get_servers()
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.back_btn.is_clicked(event.pos):
+            if self.btn_back.is_clicked(event.pos):
                 self.state = "online"
                 return
             for i, rect in self.row_rects:
                 if rect.collidepoint(event.pos):
-                    self.selected_index = i
-                    self.join_selected_server()
+                    self.selected_idx = i
+                    self.join_selected()
                     return
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.state = "online"
             elif event.key == pygame.K_DOWN and servers:
-                self.selected_index = min(self.selected_index + 1, len(servers) - 1)
+                self.selected_idx = min(self.selected_idx + 1, len(servers) - 1)
             elif event.key == pygame.K_UP and servers:
-                self.selected_index = max(self.selected_index - 1, 0)
+                self.selected_idx = max(self.selected_idx - 1, 0)
             elif event.key == pygame.K_RETURN and servers:
-                self.join_selected_server()
+                self.join_selected()
+
+    # ── Boucle principale ────────────────────────────────────────────────────
 
     def run(self):
         while self.running:
-            self.clock.tick(60)
-            draw_vertical_gradient(self.screen, BG_TOP, BG_BOTTOM)
+            dt = self.clock.tick(60)
+            self.t += dt * 0.001
+
+            draw_forest_scene(self.screen, self.t)
+            self.particles.update()
+            self.particles.draw(self.screen)
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif event.type == pygame.VIDEORESIZE:
-                    self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
+                    nw = max(MIN_W, event.w)
+                    nh = max(MIN_H, event.h)
+                    self.screen = pygame.display.set_mode((nw, nh), pygame.RESIZABLE)
+                    self.particles.resize(nw, nh)
                 elif self.state == "main":
-                    self.handle_main_event(event)
+                    self.handle_main(event)
                 elif self.state == "online":
-                    self.handle_online_event(event)
+                    self.handle_online(event)
                 elif self.state == "solo":
-                    self.handle_solo_event(event)
+                    self.handle_solo(event)
                 else:
-                    self.handle_join_event(event)
+                    self.handle_join(event)
+
             if self.state == "main":
                 self.draw_main()
             elif self.state == "online":
@@ -421,7 +469,9 @@ class Launcher:
                 self.draw_solo()
             else:
                 self.draw_join()
+
             pygame.display.flip()
+
         if self.hosted_server is not None:
             try:
                 self.hosted_server.shutdown()
