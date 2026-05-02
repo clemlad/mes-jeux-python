@@ -1,18 +1,13 @@
 """
-loup_garou_online.py – Mode multijoueur en ligne
-CORRECTIONS :
-  - run() n'appelle plus pygame.quit() (seulement pygame.display.quit)
-  - Imports is_wolf_role / ROLE_WOLF_CLR sortis de la boucle de dessin
-  - Thème visuel change selon nuit/jour
-  - Logique reveal corrigée (parenthèses précédence opérateurs)
-  - Chat toujours visible, hauteur de ligne adaptée
-  - selected_role_name initialisé correctement
-  - Rôles classiques affichés dans le lobby dès le départ
+loup_garou_online.py – Interface graphique du mode multijoueur.
+
+Communique avec loup_server.py via NetworkClient (JSON sur TCP).
+L'état de jeu arrive entièrement du serveur via des paquets "state_sync" :
+le client ne calcule rien lui-même, il affiche et envoie des actions.
 """
 import json
 import socket
 import threading
-import math
 
 import pygame
 
@@ -23,18 +18,17 @@ from loup_shared import (
     is_wolf_role,
 )
 from loup_ui_theme import (
-    BG_DEEP, BG_TOP, BG_BOTTOM, BG_MID,
-    WOLF_RED, WOLF_RED_DK, BLOOD_RED,
+    WOLF_RED, BLOOD_RED,
     MIST_PURPLE, MIST_LIGHT,
     GOLD_WARM, GOLD_PALE,
     CYAN_COOL, WHITE_SOFT, GREY_DIM, GREY_DARK,
     MOON_SILVER,
-    ROLE_WOLF_CLR, ROLE_VILLAGE_CLR, ROLE_NEUTRAL_CLR,
+    ROLE_WOLF_CLR, ROLE_VILLAGE_CLR,
     BTN_PRIMARY, BTN_PRIMARY_H,
-    BTN_DANGER, BTN_DANGER_H,
+    BTN_DANGER,
     BTN_SUCCESS, BTN_SUCCESS_H,
     BTN_NEUTRAL, BTN_NEUTRAL_H,
-    BTN_BORDER, BTN_BORDER_DIM,
+    BTN_BORDER,
     draw_gradient_bg, draw_glass_panel, draw_text, wrap_text,
     draw_moon, draw_tree_silhouette,
     ParticleSystem, Button, InputBox,
@@ -76,6 +70,8 @@ class NetworkClient:
         self.send({"type": "join", "name": player_name})
 
     def _listen(self):
+        """Lit les messages entrants. Protocole : JSON terminé par '\n', un message par ligne.
+        Le buffer accumule les données partielles jusqu'à trouver un '\n' complet."""
         buf = ""
         try:
             while self.running:
@@ -263,6 +259,7 @@ class WerewolfOnlineGame:
                     self.chat_history = new_chat
                 if len(self.chat_history) > old:
                     self.chat_scroll = 0  # scroll au bas sur nouveau message
+                # Annule la sélection si le joueur ciblé vient d'être éliminé
                 if (self.selected_target is not None
                         and all(p["id"] != self.selected_target or not p["alive"]
                                 for p in self.players)):
@@ -495,6 +492,7 @@ class WerewolfOnlineGame:
         max_scr = max(0, total_h - vis_h)
         self.role_scroll = max(0, min(self.role_scroll, max_scr))
         cy      = self.role_list_rect.y + 4 - self.role_scroll
+        # Clip pour masquer les lignes qui dépassent la zone scrollable
         old_clip = self.screen.get_clip()
         self.screen.set_clip(self.role_list_rect)
         mouse = pygame.mouse.get_pos()
@@ -691,8 +689,7 @@ class WerewolfOnlineGame:
         pygame.draw.rect(self.screen, camp_col, rb, border_radius=14)
         draw_text(self.screen, role, f["xs"], WHITE_SOFT, center=rb.center)
 
-        y   = self.center_rect.y + 102
-        dy  = 22
+        y = self.center_rect.y + 102
 
         def line(txt, col):
             nonlocal y
@@ -817,7 +814,7 @@ class WerewolfOnlineGame:
         self.draw_chat_panel()
 
         draw_text(self.screen,
-                  "Molette pour defiler  |  Clic sur un joueur pour cibler",
+                  "Molette pour défiler  |  Clic sur un joueur pour cibler",
                   f["xs"], GREY_DIM,
                   center=self.bottom_rect.center)
 

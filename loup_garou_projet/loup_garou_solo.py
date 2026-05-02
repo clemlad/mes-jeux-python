@@ -205,10 +205,12 @@ class WerewolfSoloGame:
     # ── Queue temporisée ──────────────────────────────────────────────────────
 
     def schedule(self, delay_ms: float, fn):
+        """Ajoute une action à exécuter dans delay_ms millisecondes (temps de jeu absolu)."""
         self.action_queue.append((self.game_ms + delay_ms, fn))
         self.action_queue.sort(key=lambda x: x[0])
 
     def update(self, dt_ms: float):
+        """Avance le temps de jeu et exécute toutes les actions dont l'heure est passée."""
         self.game_ms += dt_ms
         while self.action_queue and self.action_queue[0][0] <= self.game_ms:
             _, fn = self.action_queue.pop(0)
@@ -302,6 +304,12 @@ class WerewolfSoloGame:
     # ── Phase de nuit ─────────────────────────────────────────────────────────
 
     def _start_night(self):
+        """
+        Construit la séquence animée de la nuit via schedule().
+        Chaque rôle de nuit est enchaîné : loups → voyante → sorcière → résolution.
+        Si le joueur humain a un rôle actif, la chaîne se met en pause (_pause_human_*)
+        et reprend via _resume_after_human() quand il valide son action.
+        """
         self.is_animating  = True
         self.action_hint   = ""
         self.seer_result   = None
@@ -556,7 +564,12 @@ class WerewolfSoloGame:
             self.is_animating = False
 
     def _ai_votes(self):
-        """Les IA votent une par une avec IA améliorée."""
+        """
+        Votes des IA avec 3 stratégies selon le rôle :
+        - Loups    : cible commune choisie avant la boucle (coordination).
+        - Voyante  : vote contre un loup identifié la nuit (seer_known_wolves).
+        - Villageois : 45 % de chances de suivre le vote majoritaire (moutonnier).
+        """
         self.is_animating = True
         t = 0
         ai_voters = [p for p in self.players
@@ -564,7 +577,7 @@ class WerewolfSoloGame:
                      and p["id"] not in self.day_votes]
         random.shuffle(ai_voters)
 
-        # Cible coordonnée pour tous les loups
+        # La cible loup est tirée une seule fois pour que tous les loups votent pareil
         non_wolves_alive = [p for p in self.players
                             if p["alive"] and not is_wolf_role(p["role"])]
         wolf_shared_target = (random.choice(non_wolves_alive)["id"]

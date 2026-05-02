@@ -1,10 +1,8 @@
 """
-loup_ui_theme.py – Thème visuel partagé Loup-Garou (gothique nocturne)
-CORRECTIONS :
-  - clear_font_cache() pour réinitialiser après pygame.quit()/init()
-  - Guards contre width/height <= 0 dans draw_glass_panel, draw_moon, draw_tree_silhouette
-  - Particle: utilise age entier (plus léger)
-  - wrap_text: gère max_chars <= 0
+loup_ui_theme.py – Thème visuel partagé : palette, fonts, primitives de dessin et widgets.
+
+Ce module est importé par tous les écrans du jeu (main, solo, online).
+Il ne dépend que de pygame et ne contient aucune logique de jeu.
 """
 import math
 import random
@@ -49,7 +47,7 @@ _font_cache: dict = {}
 
 
 def clear_font_cache():
-    """À appeler après chaque pygame.init() pour invalider les anciennes fonts."""
+    """Invalide le cache après un pygame.quit()/init() : les objets Font ne survivent pas."""
     global _font_cache
     _font_cache = {}
 
@@ -84,6 +82,7 @@ def scaled_fonts(sw: int, sh: int, bw: int, bh: int) -> dict:
 # ── Dessin ────────────────────────────────────────────────────────────────────
 
 def draw_gradient_bg(surface: pygame.Surface, top=BG_TOP, bottom=BG_BOTTOM):
+    """Dégradé vertical ligne par ligne. Simple et lisible, la perf est acceptable à 60 fps."""
     w, h = surface.get_size()
     for y in range(h):
         t = y / max(1, h - 1)
@@ -103,6 +102,7 @@ def draw_glass_panel(surface: pygame.Surface, rect: pygame.Rect,
     ba  = border_color[3] if len(border_color) == 4 else 180
     pygame.draw.rect(panel, (*bc3, ba), (0, 0, r.width, r.height), width=1, border_radius=radius)
     if highlight and r.height > 6:
+        # Reflet lumineux en haut du panneau : blanc semi-transparent qui s'estompe vers le bas
         hl_h = max(2, r.height // 3)
         hl_w = max(1, r.width - 4)
         hl = pygame.Surface((hl_w, hl_h), pygame.SRCALPHA)
@@ -196,6 +196,7 @@ def draw_tree_silhouette(surface: pygame.Surface, x: int, bottom: int,
 # ── Particules ────────────────────────────────────────────────────────────────
 
 class Particle:
+    # __slots__ limite la mémoire allouée par instance (important quand on en crée des dizaines)
     __slots__ = ("x", "y", "vx", "vy", "size", "alpha", "color", "age", "max_age", "_w", "_h")
 
     def __init__(self, w: int, h: int):
@@ -323,7 +324,7 @@ class InputBox:
         img = font.render(display + cursor, True, col)
         max_w = self.rect.width - 28
         if img.get_width() > max_w:
-            # show end of text
+            # Tronque par le début pour toujours montrer la fin du texte (comme un vrai champ de saisie)
             display = display[-max(1, len(display) * max_w // (img.get_width() + 1)):]
             img = font.render(display + cursor, True, col)
         surface.blit(img, (self.rect.x + 14, self.rect.centery - img.get_height() // 2))

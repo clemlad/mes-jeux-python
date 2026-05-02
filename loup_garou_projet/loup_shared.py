@@ -1,9 +1,18 @@
+"""
+loup_shared.py – Logique de jeu partagée entre le mode solo et le mode en ligne.
+
+Contient le catalogue des rôles, les fonctions de construction de parties
+et les fonctions de vérification de victoire. Ce module ne dépend pas de
+pygame et peut être importé côté serveur comme côté client.
+"""
 import random
 from collections import Counter
 
 MIN_PLAYERS = 3
 MAX_PLAYERS = 12
 
+# Catalogue complet des rôles : chaque entrée définit le camp, l'aura,
+# le nombre maximum autorisé, et si le rôle agit la nuit.
 ROLE_CATALOG = {
     "Loup-garou": {
         "camp": "Loups",
@@ -50,7 +59,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": False,
-        "description": "Lorsque vous mourrez, vous pouvez éliminer un autre joueur. Dans cette version, le rôle est affiché mais la riposte n'est pas encore jouable.",
+        "description": "Lorsque vous mourrez, vous pouvez éliminer un autre joueur.",
         "ui_icon": "CH",
     },
     "Sniper": {
@@ -119,8 +128,12 @@ ROLE_CATALOG = {
     },
 }
 
+# "Villageois" est exclu de AVAILABLE_ROLES car il se place automatiquement
+# en remplissage — on n'en configure jamais le nombre manuellement.
 AVAILABLE_ROLES = [role for role in ROLE_CATALOG.keys() if role != "Villageois"]
 ROLES_ORDER = list(AVAILABLE_ROLES) + ["Villageois"]
+
+# Séparation UI : rôles affichés dans la section "classiques" vs "spéciaux"
 CLASSIC_ROLE_NAMES = ["Loup-garou", "Voyante", "Sorcière"]
 SPECIAL_ROLE_NAMES = [
     "Infect Père des Loups",
@@ -134,6 +147,8 @@ SPECIAL_ROLE_NAMES = [
     "Sirène",
     "Pyromane",
 ]
+
+# Configuration minimale par défaut : 1 loup, 1 voyante, 1 sorcière.
 DEFAULT_ROLE_CONFIG = {
     "Loup-garou": 1,
     "Voyante": 1,
@@ -142,14 +157,20 @@ DEFAULT_ROLE_CONFIG = {
 
 
 def role_details(role_name):
+    """Retourne le dictionnaire de détails d'un rôle (ou Villageois par défaut)."""
     return ROLE_CATALOG.get(role_name, ROLE_CATALOG["Villageois"])
 
 
 def is_wolf_role(role_name):
+    """Retourne True si le rôle appartient au camp des loups."""
     return role_name in {"Loup-garou", "Infect Père des Loups"}
 
 
 def normalize_role_config(role_config=None):
+    """
+    Retourne un dictionnaire complet {rôle: nombre} en partant de DEFAULT_ROLE_CONFIG
+    et en appliquant role_config par-dessus. Contraint chaque valeur entre 0 et max.
+    """
     config = {role: 0 for role in AVAILABLE_ROLES}
     for role, value in DEFAULT_ROLE_CONFIG.items():
         config[role] = value
@@ -157,6 +178,7 @@ def normalize_role_config(role_config=None):
         for role in AVAILABLE_ROLES:
             value = int(role_config.get(role, config.get(role, 0)))
             max_count = ROLE_CATALOG[role]["max"]
+            # Au moins 1 loup obligatoire, les autres peuvent être à 0
             if role == "Loup-garou":
                 config[role] = max(1, min(max_count, value))
             else:
@@ -165,6 +187,7 @@ def normalize_role_config(role_config=None):
 
 
 def configured_special_roles(role_config=None):
+    """Retourne la liste aplatie des rôles spéciaux selon la configuration."""
     config = normalize_role_config(role_config)
     roles = []
     for role in AVAILABLE_ROLES:
@@ -173,10 +196,12 @@ def configured_special_roles(role_config=None):
 
 
 def min_players_for_config(role_config=None):
+    """Nombre minimum de joueurs requis : rôles spéciaux + au moins 1 villageois."""
     return max(MIN_PLAYERS, len(configured_special_roles(role_config)) + 1)
 
 
 def role_config_error(player_count, role_config=None):
+    """Retourne un message d'erreur si la config est incompatible avec player_count, sinon None."""
     required = min_players_for_config(role_config)
     if player_count < required:
         return f"Il faut au moins {required} joueurs pour cette composition."
@@ -184,6 +209,7 @@ def role_config_error(player_count, role_config=None):
 
 
 def camp_balance(player_count, role_config=None):
+    """Calcule le ratio village/loups pour l'UI d'équilibre du lobby."""
     config = normalize_role_config(role_config)
     wolves = config.get("Loup-garou", 0) + config.get("Infect Père des Loups", 0)
     others = sum(config.values()) - wolves
@@ -192,12 +218,16 @@ def camp_balance(player_count, role_config=None):
         return {"village_ratio": 0.5, "wolves_ratio": 0.5, "counts": {"Villageois": 0, "Loups": 0}}
     return {
         "village_ratio": village / player_count,
-        "wolves_ratio": wolves / player_count,
+        "wolves_ratio":  wolves / player_count,
         "counts": {"Villageois": village, "Loups": wolves, "Specials": others},
     }
 
 
 def build_roles(player_count, role_config=None):
+    """
+    Construit et mélange la liste des rôles pour une partie.
+    Remplit avec des Villageois jusqu'à atteindre player_count.
+    """
     if player_count < MIN_PLAYERS:
         raise ValueError(f"Il faut au moins {MIN_PLAYERS} joueurs.")
     roles = configured_special_roles(role_config)
@@ -210,6 +240,7 @@ def build_roles(player_count, role_config=None):
 
 
 def role_config_label(role_config):
+    """Retourne une chaîne lisible de la composition (ex : 'Loup-garou, Voyante x2')."""
     config = normalize_role_config(role_config)
     parts = []
     for role in AVAILABLE_ROLES:
@@ -220,6 +251,7 @@ def role_config_label(role_config):
 
 
 def count_alive_by_role(players):
+    """Retourne un Counter {rôle: nombre de joueurs vivants}."""
     counter = Counter()
     for p in players:
         if p["alive"]:
@@ -228,7 +260,12 @@ def count_alive_by_role(players):
 
 
 def check_winner(players):
-    alive_wolves = sum(1 for p in players if p["alive"] and is_wolf_role(p["role"]))
+    """
+    Vérifie si une équipe a gagné.
+    Les loups gagnent dès qu'ils sont au moins aussi nombreux que les non-loups.
+    Retourne "Village", "Loups", ou None si la partie continue.
+    """
+    alive_wolves     = sum(1 for p in players if p["alive"] and is_wolf_role(p["role"]))
     alive_non_wolves = sum(1 for p in players if p["alive"] and not is_wolf_role(p["role"]))
     if alive_wolves == 0:
         return "Village"
@@ -238,18 +275,24 @@ def check_winner(players):
 
 
 def serialize_players_for(player_id, players, reveal_all=False):
+    """
+    Sérialise la liste des joueurs du point de vue de player_id.
+    Un joueur voit son propre rôle et celui des loups s'il est loup.
+    En fin de partie (reveal_all=True), tous les rôles sont visibles.
+    """
     data = []
     current_role = players[player_id]["role"] if 0 <= player_id < len(players) else None
     for p in players:
         entry = {
-            "id": p["id"],
-            "name": p["name"],
-            "alive": p["alive"],
+            "id":            p["id"],
+            "name":          p["name"],
+            "alive":         p["alive"],
             "revealed_role": p.get("revealed_role"),
         }
         if reveal_all or p["id"] == player_id:
             entry["role"] = p["role"]
         elif is_wolf_role(p["role"]) and is_wolf_role(current_role):
+            # Les loups se connaissent entre eux
             entry["role"] = p["role"]
         data.append(entry)
     return data

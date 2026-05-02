@@ -1,9 +1,10 @@
 """
-loup_server.py – Serveur Loup-Garou
-CORRECTIONS :
-  - Paramètre ready_event pour signaler que le serveur est bindé (main.py attend ce signal)
-  - clients est maintenant une liste dynamique (pas de taille fixe)
-  - Séparation propre des états lobby/game
+loup_server.py – Serveur TCP multithreadé pour le mode en ligne.
+
+Architecture : un thread par client (handle_client), toutes les mutations d'état
+protégées par self.lock. Les snapshots sont envoyés en broadcast après chaque action.
+
+Protocole : messages JSON terminés par '\n', un message par ligne.
 """
 import json
 import socket
@@ -15,7 +16,6 @@ from chat_moderation import ChatModerator
 from loup_shared import (
     MIN_PLAYERS,
     MAX_PLAYERS,
-    ROLE_CATALOG,
     build_roles,
     check_winner,
     is_wolf_role,
@@ -78,7 +78,7 @@ class WerewolfServer:
         self.pending_wolf_target = None
 
     def _ensure_slot(self, player_id: int):
-        """Étend clients[] si nécessaire."""
+        """Étend clients[] pour que l'index player_id existe (liste dynamique)."""
         while len(self.clients) <= player_id:
             self.clients.append(None)
 
@@ -94,7 +94,7 @@ class WerewolfServer:
     def append_chat(self, author: str, message: str, system: bool = False):
         entry = {"author": author, "message": message[:220], "system": system}
         self.chat_history.append(entry)
-        self.chat_history = self.chat_history[-80:]
+        self.chat_history = self.chat_history[-80:]   # conserve les 80 derniers messages
 
     def broadcast_snapshots(self):
         for player in self.players:
@@ -279,6 +279,11 @@ class WerewolfServer:
         self.broadcast_snapshots()
 
     def resolve_wolves_if_ready(self) -> bool:
+        """
+        Agrège les votes des loups dès qu'ils ont tous voté.
+        Retourne True si la cible est déterminée (ou s'il n'y a pas de loup vivant).
+        En cas d'égalité, le joueur avec le plus petit id l'emporte (déterministe).
+        """
         wolves = [p for p in self.players
                   if p.get("connected") and p["alive"] and is_wolf_role(p["role"])]
         if wolves and len(self.wolf_votes) == len(wolves):
@@ -287,6 +292,11 @@ class WerewolfServer:
         return self.pending_wolf_target is not None or not wolves
 
     def resolve_night_if_ready(self):
+        """
+        Résout la nuit uniquement quand tous les rôles de nuit ont agi.
+        Le all() vérifie : soit le joueur n'a pas ce rôle, soit il est mort,
+        soit il a déjà effectué son action (seer_done / witch_done).
+        """
         wolves_ready = self.resolve_wolves_if_ready()
         seer_ready   = all(
             p["role"] != "Voyante" or not p["alive"]
@@ -436,6 +446,8 @@ class WerewolfServer:
     # ── Boucle serveur ───────────────────────────────────────────────────────
 
     def handle_client(self, conn, player_id: int):
+        """Boucle de réception pour un client. Tourne dans son propre thread daemon.
+        Toute mutation de l'état partagé est faite sous self.lock."""
         buf = ""
         try:
             while self.running:
@@ -513,11 +525,12 @@ class WerewolfServer:
             return
 
         self.server.listen(MAX_PLAYERS + 2)
+        # Timeout sur accept() pour que la boucle puisse vérifier self.running régulièrement
         self.server.settimeout(1.0)
         self.broadcaster.start()
         self.bind_ok = True
 
-        # Signaler que le serveur est prêt
+        # Signale au Launcher que le socket est prêt → il peut se connecter en client
         if self.ready_event:
             self.ready_event.set()
 

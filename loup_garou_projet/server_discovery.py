@@ -1,16 +1,27 @@
+"""
+server_discovery.py – Découverte automatique des serveurs sur le réseau local.
+
+Utilise UDP broadcast : le serveur envoie une annonce toutes les secondes sur
+le port DISCOVERY_PORT, et les clients écoutent ce port pour lister les salons
+disponibles. Les serveurs non reçus depuis SERVER_TIMEOUT secondes sont supprimés.
+"""
 import json
 import socket
 import threading
 import time
 
-DISCOVERY_PORT = 37020
-GAME_PORT = 5555
-DISCOVERY_INTERVAL = 1.0
-SERVER_TIMEOUT = 3.5
-ANNOUNCE_TYPE = "werewolf_server_announce"
+DISCOVERY_PORT    = 37020   # port UDP d'annonce (distinct du port TCP de jeu)
+GAME_PORT         = 5555    # port TCP du serveur de jeu
+DISCOVERY_INTERVAL = 1.0   # fréquence d'envoi des annonces (secondes)
+SERVER_TIMEOUT    = 3.5     # délai avant de considérer un serveur disparu
+ANNOUNCE_TYPE     = "werewolf_server_announce"
 
 
 def get_local_ip():
+    """
+    Détermine l'IP locale de la machine en établissant une connexion UDP factice
+    vers 8.8.8.8 (aucune donnée n'est envoyée) pour laisser l'OS choisir l'interface.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
@@ -23,14 +34,16 @@ def get_local_ip():
 
 
 class ServerBroadcaster:
+    """Diffuse périodiquement une annonce UDP pour rendre le serveur visible sur le réseau."""
+
     def __init__(self, server_name, host_ip=None, game_port=GAME_PORT):
-        self.server_name = server_name
-        self.host_ip = host_ip or get_local_ip()
-        self.game_port = game_port
-        self.running = False
-        self.thread = None
+        self.server_name  = server_name
+        self.host_ip      = host_ip or get_local_ip()
+        self.game_port    = game_port
+        self.running      = False
+        self.thread       = None
         self.player_count = 1
-        self.max_players = 12
+        self.max_players  = 12
         self.role_summary = "1 loup(s), voyante, sorcière"
 
     def set_player_count(self, count):
@@ -53,22 +66,25 @@ class ServerBroadcaster:
         self.running = False
 
     def _run(self):
+        """Boucle d'envoi : reconstruit le payload à chaque itération pour refléter
+        les valeurs les plus récentes (joueurs connectés, config des rôles)."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         payload = {
-            "type": ANNOUNCE_TYPE,
-            "name": self.server_name,
-            "host": self.host_ip,
-            "port": self.game_port,
-            "players": self.player_count,
+            "type":        ANNOUNCE_TYPE,
+            "name":        self.server_name,
+            "host":        self.host_ip,
+            "port":        self.game_port,
+            "players":     self.player_count,
             "max_players": self.max_players,
-            "roles": self.role_summary,
+            "roles":       self.role_summary,
         }
         try:
             while self.running:
-                payload["players"] = self.player_count
+                # Mise à jour des champs dynamiques avant chaque envoi
+                payload["players"]     = self.player_count
                 payload["max_players"] = self.max_players
-                payload["roles"] = self.role_summary
+                payload["roles"]       = self.role_summary
                 data = json.dumps(payload).encode("utf-8")
                 sock.sendto(data, ("255.255.255.255", DISCOVERY_PORT))
                 time.sleep(DISCOVERY_INTERVAL)
@@ -77,11 +93,13 @@ class ServerBroadcaster:
 
 
 class ServerDiscovery:
+    """Écoute les annonces UDP et maintient une liste à jour des serveurs actifs."""
+
     def __init__(self):
-        self.running = False
-        self.thread = None
-        self.lock = threading.Lock()
-        self.found_servers = {}
+        self.running        = False
+        self.thread         = None
+        self.lock           = threading.Lock()
+        self.found_servers  = {}   # clé : (host, port)
 
     def start(self):
         if self.running:
@@ -94,15 +112,17 @@ class ServerDiscovery:
         self.running = False
 
     def _listen(self):
+        """Écoute les paquets UDP et met à jour found_servers."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("", DISCOVERY_PORT))
-        sock.settimeout(1.0)
+        sock.settimeout(1.0)   # timeout pour pouvoir vérifier self.running régulièrement
         try:
             while self.running:
                 try:
                     data, addr = sock.recvfrom(4096)
                 except socket.timeout:
+                    # Pas de paquet reçu → on profite du timeout pour nettoyer les vieux serveurs
                     self._cleanup()
                     continue
                 except OSError:
@@ -118,32 +138,32 @@ class ServerDiscovery:
 
                 host = msg.get("host") or addr[0]
                 port = msg.get("port", GAME_PORT)
-                key = (host, port)
+                key  = (host, port)
                 with self.lock:
                     self.found_servers[key] = {
-                        "name": msg.get("name", "Serveur"),
-                        "host": host,
-                        "port": port,
-                        "players": msg.get("players", 0),
+                        "name":        msg.get("name", "Serveur"),
+                        "host":        host,
+                        "port":        port,
+                        "players":     msg.get("players", 0),
                         "max_players": msg.get("max_players", 12),
-                        "roles": msg.get("roles", "Configuration par défaut"),
-                        "last_seen": time.time(),
+                        "roles":       msg.get("roles", "Configuration par défaut"),
+                        "last_seen":   time.time(),
                     }
                 self._cleanup()
         finally:
             sock.close()
 
     def _cleanup(self):
+        """Supprime les serveurs dont la dernière annonce date de plus de SERVER_TIMEOUT secondes."""
         now = time.time()
         with self.lock:
-            expired = [
-                key for key, info in self.found_servers.items()
-                if now - info["last_seen"] > SERVER_TIMEOUT
-            ]
+            expired = [key for key, info in self.found_servers.items()
+                       if now - info["last_seen"] > SERVER_TIMEOUT]
             for key in expired:
                 del self.found_servers[key]
 
     def get_servers(self):
+        """Retourne une copie triée de la liste des serveurs actifs."""
         with self.lock:
             servers = list(self.found_servers.values())
         servers.sort(key=lambda s: (s["name"].lower(), s["host"], s["port"]))

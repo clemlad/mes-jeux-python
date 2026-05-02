@@ -1,10 +1,8 @@
 """
-main.py – Lanceur principal Loup-Garou
-CORRECTIONS :
-  - restore_window() appelle clear_font_cache() pour invalider les fonts après pygame.quit()
-  - Les sous-jeux NE font plus pygame.quit() (seulement pygame.display.quit)
-  - create_server() attend confirmation que le serveur est bien bindé
-  - Fond forestier animé avec lune, étoiles, brume, arbres
+main.py – Lanceur principal : menu de sélection de mode et pont vers les sous-jeux.
+
+Les sous-jeux (solo, online) appellent pygame.display.quit() mais PAS pygame.quit()
+pour que le Launcher puisse recréer la fenêtre proprement après leur fermeture.
 """
 import threading
 import time
@@ -46,6 +44,7 @@ _STARS_SIZE = (0, 0)
 
 
 def _init_stars(w, h):
+    # Recalcule les étoiles uniquement si la taille de la fenêtre a changé
     global _STARS, _STARS_SIZE
     if _STARS is None or _STARS_SIZE != (w, h):
         _STARS = [(random.randint(0, w), random.randint(0, h * 55 // 100),
@@ -137,16 +136,14 @@ class Launcher:
         self.message = ""
 
     def restore_window(self, size: tuple):
-        """Recrée la fenêtre pygame proprement après un sous-jeu."""
-        # Les sous-jeux appellent pygame.display.quit() mais pas pygame.quit()
-        # On réinitialise seulement si nécessaire
+        """Recrée la fenêtre après qu'un sous-jeu a appelé pygame.display.quit()."""
         if not pygame.get_init():
             pygame.init()
         if not pygame.display.get_init():
             pygame.display.init()
         if not pygame.font.get_init():
             pygame.font.init()
-        # Invalider le cache de fonts car pygame.font a pu être réinitialisé
+        # Les objets Font ne survivent pas à un reinit de pygame.font → vider le cache
         clear_font_cache()
         self.screen = pygame.display.set_mode(size, pygame.RESIZABLE)
         pygame.display.set_caption("Loup-Garou")
@@ -189,7 +186,7 @@ class Launcher:
             self.message = error_msg
 
     def create_server(self):
-        """Crée le serveur, attend qu'il soit prêt, puis lance le jeu en hôte."""
+        """Démarre le serveur dans un thread puis rejoint immédiatement en tant qu'hôte."""
         if self.hosted_server is not None:
             try:
                 self.hosted_server.shutdown()
@@ -209,7 +206,8 @@ class Launcher:
         self.host_thread = threading.Thread(target=server.serve_forever, daemon=True)
         self.host_thread.start()
 
-        # Attendre que le serveur soit bindé (max 3 secondes)
+        # On attend le signal du serveur avant de se connecter : sans ça, le client
+        # arriverait avant que le socket ne soit prêt à accepter des connexions.
         if not ready_event.wait(timeout=3.0) or not server.bind_ok:
             self.message = "Impossible de démarrer le serveur (port occupé ?)."
             self.hosted_server = None
