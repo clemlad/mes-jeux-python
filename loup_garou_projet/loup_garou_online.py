@@ -130,6 +130,7 @@ class WerewolfOnlineGame:
         self.your_id           = None
         self.host_id           = None
         self.phase             = "lobby"
+        self.prev_phase        = None
         self.day_count         = 0
         self.winner            = None
         self.selected_target   = None
@@ -137,32 +138,40 @@ class WerewolfOnlineGame:
         self.night_target_name = None
         self.seer_result       = None
         self.can_act           = False
+        self.can_chat          = True
+        self.has_voted         = False
+        self.votes_cast        = 0
+        self.votes_needed      = 0
+        self.witch_heal_available   = True
+        self.witch_poison_available = True
         self.max_players       = 8
         self.role_config       = normalize_role_config({})
         self.chat_history: list = []
         self.chat_scroll        = 0
         self.role_scroll        = 0
-        # Initialiser selected_role_name avec le premier rôle dispo
         self.selected_role_name = CLASSIC_ROLE_NAMES[0]
         self.show_role_info     = False
 
         # Boutons
-        self.btn_start     = Button("LANCER LA PARTIE",  BTN_SUCCESS, BTN_SUCCESS_H)
-        self.btn_vote      = Button("VALIDER L'ACTION",  BTN_PRIMARY, BTN_PRIMARY_H)
-        self.btn_sync      = Button("SYNC",              BTN_NEUTRAL, BTN_NEUTRAL_H)
-        self.btn_skip      = Button("PASSER",            BTN_NEUTRAL, BTN_NEUTRAL_H)
-        self.btn_save      = Button("SAUVER",            BTN_SUCCESS, BTN_SUCCESS_H)
-        self.btn_send_chat = Button("ENVOYER",           BTN_PRIMARY, BTN_PRIMARY_H)
-        self.chat_input    = InputBox(placeholder="Ecris un message...", max_len=220)
+        self.btn_start       = Button("LANCER LA PARTIE",    BTN_SUCCESS, BTN_SUCCESS_H)
+        self.btn_vote        = Button("VALIDER L'ACTION",    BTN_PRIMARY, BTN_PRIMARY_H)
+        self.btn_sync        = Button("SYNC",                BTN_NEUTRAL, BTN_NEUTRAL_H)
+        self.btn_skip        = Button("PASSER",              BTN_NEUTRAL, BTN_NEUTRAL_H)
+        self.btn_save        = Button("SAUVER LA VICTIME",   BTN_SUCCESS, BTN_SUCCESS_H)
+        self.btn_poison      = Button("EMPOISONNER",         (90, 24, 80), (120, 38, 108))
+        self.btn_send_chat   = Button("ENVOYER",             BTN_PRIMARY, BTN_PRIMARY_H)
+        self.btn_end         = Button("RETOUR AU MENU",      BTN_NEUTRAL, BTN_NEUTRAL_H)
+        self.chat_input      = InputBox(placeholder="Écris un message...", max_len=220)
 
-        self.player_rects: list   = []
+        self.player_rects: list    = []
         self.role_row_rects: dict  = {}
         self.role_minus_rects: dict = {}
         self.role_plus_rects: dict  = {}
-        self.count_left_rect  = pygame.Rect(0, 0, 0, 0)
-        self.count_right_rect = pygame.Rect(0, 0, 0, 0)
-        self.role_list_rect   = pygame.Rect(0, 0, 0, 0)
+        self.count_left_rect      = pygame.Rect(0, 0, 0, 0)
+        self.count_right_rect     = pygame.Rect(0, 0, 0, 0)
+        self.role_list_rect       = pygame.Rect(0, 0, 0, 0)
         self.role_info_close_rect = pygame.Rect(0, 0, 0, 0)
+        self.btn_end_rect         = pygame.Rect(0, 0, 0, 0)
 
         self.particles = ParticleSystem(BASE_W, BASE_H, 35)
         self.compute_layout()
@@ -185,15 +194,28 @@ class WerewolfOnlineGame:
                                        h - 150)
         self.bottom_rect = pygame.Rect(pad, h - 50, w - pad * 2, 36)
 
-        bw = min(250, self.center_rect.width - 40)
         bx = self.center_rect.x + 20
         by = self.center_rect.bottom - 56
-        self.btn_start.set_rect    ((bx, by, self.center_rect.width - 40, 44))
-        self.btn_vote.set_rect     ((bx, by, bw, 44))
+        full_w = self.center_rect.width - 40
+        bw = min(250, full_w)
         skip_x = bx + bw + 10
         skip_w = max(80, self.center_rect.right - 20 - skip_x)
-        self.btn_skip.set_rect     ((skip_x, by, skip_w, 44))
-        self.btn_save.set_rect     ((skip_x, by, skip_w, 44))
+
+        self.btn_start.set_rect((bx, by, full_w, 44))
+        self.btn_vote.set_rect ((bx, by, bw, 44))
+        self.btn_skip.set_rect ((skip_x, by, skip_w, 44))
+        self.btn_save.set_rect ((skip_x, by, skip_w, 44))
+
+        # Boutons sorcière (3 colonnes égales)
+        wb = max(70, full_w // 3 - 6)
+        self.btn_save.set_rect  ((bx,            by, wb, 44))
+        self.btn_poison.set_rect((bx + wb + 8,   by, wb, 44))
+        self.btn_skip.set_rect  ((bx + wb*2 + 16, by, max(60, full_w - wb*2 - 16), 44))
+
+        # Bouton fin de partie
+        ew = min(300, full_w)
+        self.btn_end.set_rect((self.center_rect.centerx - ew // 2, by, ew, 44))
+
         self.btn_sync.set_rect     ((self.top_rect.right - 110, self.top_rect.y + 13, 90, 38))
         self.chat_input.set_rect   ((self.chat_rect.x + 12, self.chat_rect.bottom - 54,
                                      self.chat_rect.width - 110, 40))
@@ -232,7 +254,7 @@ class WerewolfOnlineGame:
             if mt == "state_sync":
                 self.state             = "game"
                 self.server_name       = msg.get("server_name", self.server_name)
-                self.phase             = msg.get("phase", "lobby")
+                new_phase              = msg.get("phase", "lobby")
                 self.day_count         = msg.get("day_count", 0)
                 self.players           = msg.get("players", [])
                 self.your_id           = msg.get("your_id", self.your_id)
@@ -242,12 +264,24 @@ class WerewolfOnlineGame:
                 self.night_target_name = msg.get("night_target_name")
                 self.winner            = msg.get("winner")
                 self.can_act           = msg.get("can_act", False)
+                self.can_chat          = msg.get("can_chat", True)
+                self.has_voted         = msg.get("has_voted", False)
+                self.votes_cast        = msg.get("votes_cast", 0)
+                self.votes_needed      = msg.get("votes_needed", 0)
                 self.action_hint       = msg.get("action_hint", "")
                 self.seer_result       = msg.get("seer_result")
                 self.max_players       = msg.get("max_players", self.max_players)
-                self.role_config       = normalize_role_config(
+                self.witch_heal_available   = msg.get("witch_heal_available", self.witch_heal_available)
+                self.witch_poison_available = msg.get("witch_poison_available", self.witch_poison_available)
+                self.role_config = normalize_role_config(
                     msg.get("role_config", self.role_config))
-                # Garder selected_role_name valide
+
+                # Réinitialise la sélection à chaque changement de phase
+                if new_phase != self.prev_phase:
+                    self.selected_target = None
+                    self.prev_phase = new_phase
+                self.phase = new_phase
+
                 if (self.selected_role_name is None
                         or self.selected_role_name not in self.role_config):
                     self.selected_role_name = (CLASSIC_ROLE_NAMES[0]
@@ -258,14 +292,14 @@ class WerewolfOnlineGame:
                 if new_chat:
                     self.chat_history = new_chat
                 if len(self.chat_history) > old:
-                    self.chat_scroll = 0  # scroll au bas sur nouveau message
-                # Annule la sélection si le joueur ciblé vient d'être éliminé
+                    self.chat_scroll = 0
+                # Annule la sélection si le joueur ciblé est mort
                 if (self.selected_target is not None
                         and all(p["id"] != self.selected_target or not p["alive"]
                                 for p in self.players)):
                     self.selected_target = None
             elif mt == "error":
-                self.message = "Erreur : " + msg.get("message", "")
+                self.message = "⚠ " + msg.get("message", "")
             elif mt == "info":
                 self.message = msg.get("message", self.message)
 
@@ -307,22 +341,28 @@ class WerewolfOnlineGame:
             return
         if self.phase == "day" and self.selected_target is not None:
             self.network.send({"type": "vote_action", "target": self.selected_target})
+            self.selected_target = None
             return
         if self.phase == "night" and self.selected_target is not None:
-            if role in ("Loup-garou", "Infect Pere des Loups"):
+            if is_wolf_role(role):
                 self.network.send({"type": "night_action", "action": "wolf_kill",
                                    "target": self.selected_target})
+                self.selected_target = None
             elif role == "Voyante":
                 self.network.send({"type": "night_action", "action": "seer_peek",
                                    "target": self.selected_target})
-            elif role == "Sorcière":
-                self.network.send({"type": "night_action", "action": "witch_poison",
-                                   "target": self.selected_target})
+                self.selected_target = None
 
-    def send_skip(self):
+    def send_witch_poison(self):
+        if self.selected_target is not None:
+            self.network.send({"type": "night_action", "action": "witch_poison",
+                               "target": self.selected_target})
+            self.selected_target = None
+
+    def send_witch_skip(self):
         self.network.send({"type": "night_action", "action": "witch_skip"})
 
-    def send_save(self):
+    def send_witch_save(self):
         self.network.send({"type": "night_action", "action": "witch_save"})
 
     def send_chat(self):
@@ -656,7 +696,8 @@ class WerewolfOnlineGame:
     # ── Panneau jeu ──────────────────────────────────────────────────────────
 
     def draw_game_panel(self):
-        f = self.fonts()
+        f     = self.fonts()
+        mouse = pygame.mouse.get_pos()
         is_day = (self.phase == "day")
 
         # Panneau teinté selon phase
@@ -672,72 +713,150 @@ class WerewolfOnlineGame:
                          width=2, border_radius=22)
         self.screen.blit(panel_s, self.center_rect.topleft)
 
+        # ----- Ecran de fin de partie
+        if self.phase == "end" and self.winner:
+            self._draw_end_screen(f, mouse)
+            return
+
         phase_labels = {
-            "lobby": ("Lobby",              GOLD_PALE),
-            "night": ("Nuit " + str(self.day_count), MOON_SILVER),
-            "day":   ("Jour " + str(self.day_count),  GOLD_WARM),
-            "end":   ("Fin de partie",                  WOLF_RED),
+            "night": (f"  Nuit {self.day_count}", MOON_SILVER),
+            "day":   (f"  Jour {self.day_count}",  GOLD_WARM),
         }
-        ph_txt, ph_col = phase_labels.get(self.phase, (self.phase, WHITE_SOFT))
+        ph_txt, ph_col = phase_labels.get(self.phase, (self.phase.capitalize(), WHITE_SOFT))
         draw_text(self.screen, ph_txt, f["big"], ph_col,
                   topleft=(self.center_rect.x + 18, self.center_rect.y + 12), shadow=True)
 
         role = self.current_role() or "Non attribue"
         det  = ROLE_CATALOG.get(role, ROLE_CATALOG["Villageois"])
         camp_col = ROLE_CAMP_COLOR.get(det["camp"], MIST_PURPLE)
-        rb = pygame.Rect(self.center_rect.x + 18, self.center_rect.y + 56, 120, 30)
+        rb = pygame.Rect(self.center_rect.x + 18, self.center_rect.y + 56, 140, 28)
         pygame.draw.rect(self.screen, camp_col, rb, border_radius=14)
         draw_text(self.screen, role, f["xs"], WHITE_SOFT, center=rb.center)
 
-        y = self.center_rect.y + 102
+        # Badge cible selectionnee
+        if self.selected_target is not None:
+            tgt_name = next((p["name"] for p in self.players
+                             if p["id"] == self.selected_target), "?")
+            sr = pygame.Rect(rb.right + 10, rb.y, 160, 28)
+            pygame.draw.rect(self.screen, (80, 48, 14), sr, border_radius=14)
+            pygame.draw.rect(self.screen, GOLD_WARM, sr, 1, border_radius=14)
+            draw_text(self.screen, f"Cible : {tgt_name}", f["xs"], GOLD_WARM, center=sr.center)
+
+        y = self.center_rect.y + 100
 
         def line(txt, col):
             nonlocal y
             if not txt:
                 return
-            for l in wrap_text(txt, max(24, (self.center_rect.width - 40) // 9)):
-                if y + 16 > self.center_rect.bottom - 70:
+            for ln in wrap_text(txt, max(24, (self.center_rect.width - 40) // 9)):
+                if y + 16 > self.center_rect.bottom - 76:
                     return
-                draw_text(self.screen, l, f["xs"], col,
+                draw_text(self.screen, ln, f["xs"], col,
                           topleft=(self.center_rect.x + 18, y))
                 y += 18
             y += 4
 
         line(self.message, WHITE_SOFT)
         line(self.action_hint, GOLD_PALE)
-        if self.night_target_name:
-            line("Victime visee : " + self.night_target_name, WOLF_RED)
-        if self.seer_result:
-            line(self.seer_result, CYAN_COOL)
+
+        if self.phase == "day" and self.votes_needed > 0:
+            line(f"Votes : {self.votes_cast}/{self.votes_needed}",
+                 GOLD_WARM if self.has_voted else GREY_DIM)
+            if self.has_voted:
+                line("Vote enregistre - en attente des autres joueurs.", CYAN_COOL)
+            else:
+                line("Selectionnez un joueur puis cliquez VALIDER LE VOTE.", GOLD_PALE)
+
+        if self.phase == "night":
+            if self.night_target_name:
+                line(f"Victime des loups : {self.night_target_name}", WOLF_RED)
+            if self.seer_result:
+                line(self.seer_result, CYAN_COOL)
+
         if self.last_deaths:
-            line("Elimines : " + ", ".join(self.last_deaths), BLOOD_RED)
+            line("Elimine(s) : " + ", ".join(self.last_deaths), BLOOD_RED)
 
         pygame.draw.line(self.screen, (58, 48, 88),
                          (self.center_rect.x + 18, y + 4),
                          (self.center_rect.right - 18, y + 4))
         y += 12
         line(f"Aura : {det['aura']}  |  Camp : {det['camp']}", CYAN_COOL)
-        for l in wrap_text(det["description"],
-                           max(28, (self.center_rect.width - 36) // 9))[:3]:
-            if y + 16 > self.center_rect.bottom - 70:
+        for ln in wrap_text(det["description"],
+                            max(28, (self.center_rect.width - 36) // 9))[:3]:
+            if y + 16 > self.center_rect.bottom - 76:
                 break
-            draw_text(self.screen, l, f["xs"], GREY_DIM,
+            draw_text(self.screen, ln, f["xs"], GREY_DIM,
                       topleft=(self.center_rect.x + 18, y))
             y += 17
 
-        mouse = pygame.mouse.get_pos()
-        if self.phase in ("night", "day"):
+        # ---- Boutons d'action
+        is_witch = role.startswith("Sorci") and self.phase == "night" and self.can_act
+        if is_witch:
+            self._draw_witch_buttons(f, mouse)
+        elif self.phase in ("night", "day"):
             lbl = "VALIDER LE VOTE" if self.phase == "day" else "VALIDER L'ACTION"
             self.btn_vote.text = lbl
-            self.btn_vote.draw(self.screen, f["small"], mouse,
-                               enabled=(self.can_act and self.selected_target is not None))
-            if self.phase == "night" and role == "Sorcière":
-                if self.night_target_name:
-                    self.btn_save.draw(self.screen, f["small"], mouse,
-                                       enabled=self.can_act)
-                else:
-                    self.btn_skip.draw(self.screen, f["small"], mouse,
-                                       enabled=self.can_act)
+            vote_ok = (self.can_act and self.selected_target is not None
+                       and not self.has_voted)
+            self.btn_vote.draw(self.screen, f["small"], mouse, enabled=vote_ok)
+
+    def _draw_witch_buttons(self, f: dict, mouse):
+        save_ok   = (self.witch_heal_available and self.night_target_name is not None)
+        poison_ok = (self.witch_poison_available and self.selected_target is not None)
+        lbl_save = ("SAUVER " + (self.night_target_name or "")[:10]).strip()
+        self.btn_save.text   = lbl_save
+        self.btn_poison.text = "EMPOISONNER"
+        self.btn_skip.text   = "PASSER"
+        self.btn_save.draw  (self.screen, f["xs"], mouse, enabled=save_ok)
+        self.btn_poison.draw(self.screen, f["xs"], mouse, enabled=poison_ok)
+        self.btn_skip.draw  (self.screen, f["xs"], mouse, enabled=True)
+        iy = self.btn_save.rect.y - 18
+        draw_text(self.screen,
+                  "Potion soin" if self.witch_heal_available else "Soin epuise",
+                  f["xs"], GOLD_WARM if self.witch_heal_available else GREY_DIM,
+                  topleft=(self.btn_save.rect.x, iy))
+        draw_text(self.screen,
+                  "Potion mort" if self.witch_poison_available else "Mort epuisee",
+                  f["xs"], (160, 60, 180) if self.witch_poison_available else GREY_DIM,
+                  topleft=(self.btn_poison.rect.x, iy))
+
+    def _draw_end_screen(self, f: dict, mouse):
+        cr = self.center_rect
+        is_village = (self.winner == "Village")
+        bg = pygame.Surface((cr.width, cr.height), pygame.SRCALPHA)
+        bg_col  = (20, 44, 28, 230) if is_village else (40, 10, 16, 230)
+        brd_col = (56, 140, 70, 200) if is_village else (180, 30, 48, 200)
+        pygame.draw.rect(bg, bg_col,  (0, 0, cr.width, cr.height), border_radius=22)
+        pygame.draw.rect(bg, brd_col, (0, 0, cr.width, cr.height), width=3, border_radius=22)
+        self.screen.blit(bg, cr.topleft)
+
+        title = "VICTOIRE DU VILLAGE !" if is_village else "VICTOIRE DES LOUPS !"
+        tcol  = (80, 220, 100) if is_village else WOLF_RED
+        draw_text(self.screen, title, f["big"], tcol,
+                  center=(cr.centerx, cr.y + 42), shadow=True)
+        draw_text(self.screen, self.message, f["xs"], GOLD_PALE,
+                  center=(cr.centerx, cr.y + 82))
+
+        y = cr.y + 112
+        col_w = cr.width - 28
+        for p in self.players:
+            if y + 28 > cr.bottom - 66:
+                break
+            role_str = p.get("revealed_role") or p.get("role") or "?"
+            alive    = p["alive"]
+            bg2 = (52, 14, 14) if is_wolf_role(role_str) else \
+                  (24, 52, 28) if alive else (30, 26, 48)
+            row = pygame.Rect(cr.x + 14, y, col_w, 26)
+            pygame.draw.rect(self.screen, bg2, row, border_radius=8)
+            name_col   = WHITE_SOFT if alive else GREY_DIM
+            status     = "Survivant" if alive else "Elimine"
+            status_col = GOLD_WARM  if alive else WOLF_RED
+            draw_text(self.screen, p["name"],  f["xs"], name_col,   topleft=(row.x + 8,   row.y + 5))
+            draw_text(self.screen, role_str,    f["xs"], CYAN_COOL,  topleft=(row.x + 130, row.y + 5))
+            draw_text(self.screen, status,      f["xs"], status_col, topleft=(row.x + 260, row.y + 5))
+            y += 30
+
+        self.btn_end.draw(self.screen, f["small"], mouse, enabled=True)
 
     # ── Chat ─────────────────────────────────────────────────────────────────
 
@@ -763,17 +882,18 @@ class WerewolfOnlineGame:
         for entry in visible:
             if y + line_h > vis_bot:
                 break
-            system = entry.get("system")
+            system    = entry.get("system")
+            wolf_only = entry.get("wolf_only", False)
             author = "[Systeme]" if system else entry.get("author", "?")
-            acol   = WOLF_RED if system else GOLD_WARM
+            acol   = WOLF_RED if system else (WOLF_RED if wolf_only else GOLD_WARM)
             draw_text(self.screen, author + ":", f["xs"], acol,
                       topleft=(self.chat_rect.x + 12, y))
             msg_txt = entry.get("message", "")
-            # Tronquer si trop long
             max_c = max(10, (self.chat_rect.width - 24) // 8)
             if len(msg_txt) > max_c:
                 msg_txt = msg_txt[:max_c - 2] + ".."
-            draw_text(self.screen, msg_txt, f["xs"], WHITE_SOFT,
+            msg_col = (200, 140, 140) if wolf_only else WHITE_SOFT
+            draw_text(self.screen, msg_txt, f["xs"], msg_col,
                       topleft=(self.chat_rect.x + 18, y + 18))
             y += line_h
 
@@ -786,8 +906,18 @@ class WerewolfOnlineGame:
             ty2 = vis_top + int((bh - th) * (self.chat_scroll / max_scr))
             pygame.draw.rect(self.screen, CYAN_COOL, (bx, ty2, 5, th), border_radius=3)
 
-        self.chat_input.draw(self.screen, f["xs"])
-        self.btn_send_chat.draw(self.screen, f["xs"], pygame.mouse.get_pos())
+        # Desactiver le chat si non autorise (nuit, non-loup)
+        chat_allowed = self.can_chat
+        if not chat_allowed:
+            overlay = pygame.Surface((self.chat_rect.width - 4, 46), pygame.SRCALPHA)
+            pygame.draw.rect(overlay, (10, 8, 22, 190), (0, 0, overlay.get_width(), 46), border_radius=12)
+            self.screen.blit(overlay, (self.chat_rect.x + 2, self.chat_rect.bottom - 56))
+            draw_text(self.screen, "Chat desactive la nuit (loups seulement)",
+                      f["xs"], GREY_DIM,
+                      center=(self.chat_rect.centerx, self.chat_rect.bottom - 34))
+        else:
+            self.chat_input.draw(self.screen, f["xs"])
+            self.btn_send_chat.draw(self.screen, f["xs"], pygame.mouse.get_pos())
 
     # ── Draw principal ───────────────────────────────────────────────────────
 
@@ -824,9 +954,11 @@ class WerewolfOnlineGame:
         if event.type == pygame.MOUSEWHEEL:
             pos = pygame.mouse.get_pos()
             if self.chat_rect.collidepoint(pos):
-                self.chat_scroll = max(0, self.chat_scroll - event.y)
+                # Molette haut (y>0) = messages plus anciens = scroll augmente
+                self.chat_scroll = max(0, self.chat_scroll + event.y)
                 return
             if self.phase == "lobby" and self.role_list_rect.collidepoint(pos):
+                # Molette haut = remonter dans la liste = scroll diminue (offset depuis le haut)
                 self.role_scroll = max(0, self.role_scroll - event.y * 24)
                 self.show_role_info = False
                 return
@@ -837,7 +969,7 @@ class WerewolfOnlineGame:
             self.compute_layout()
             return
 
-        if self.chat_input.handle_event(event):
+        if self.can_chat and self.chat_input.handle_event(event):
             self.send_chat()
             return
 
@@ -859,7 +991,7 @@ class WerewolfOnlineGame:
         if self.btn_sync.is_clicked(event.pos):
             self.network.send({"type": "sync_request"})
             return
-        if self.btn_send_chat.is_clicked(event.pos):
+        if self.can_chat and self.btn_send_chat.is_clicked(event.pos):
             self.send_chat()
             return
 
@@ -889,7 +1021,12 @@ class WerewolfOnlineGame:
                 self.send_action()
             return
 
-        # Sélection joueur en jeu
+        # Bouton retour menu (ecran de fin)
+        if self.phase == "end" and self.btn_end.is_clicked(event.pos):
+            self.running = False
+            return
+
+        # Selection joueur en jeu
         for pid, rect in self.player_rects:
             if rect.collidepoint(event.pos):
                 for p in self.players:
@@ -897,13 +1034,23 @@ class WerewolfOnlineGame:
                         self.selected_target = pid
                         return
 
+        # Actions phase nuit/jour
+        role = self.current_role() or ""
+        is_witch = (role == "Sorcière") and self.phase == "night"
+
+        if is_witch and self.can_act:
+            if self.btn_save.is_clicked(event.pos):
+                self.send_witch_save()
+                return
+            if self.btn_poison.is_clicked(event.pos):
+                self.send_witch_poison()
+                return
+            if self.btn_skip.is_clicked(event.pos):
+                self.send_witch_skip()
+                return
+
         if self.phase in ("night", "day") and self.btn_vote.is_clicked(event.pos):
             self.send_action()
-        elif self.phase == "night" and self.current_role() == "Sorcière":
-            if self.btn_save.is_clicked(event.pos):
-                self.send_save()
-            elif self.btn_skip.is_clicked(event.pos):
-                self.send_skip()
 
     # ── Boucle ───────────────────────────────────────────────────────────────
 

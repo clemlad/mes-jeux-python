@@ -91,10 +91,10 @@ class WerewolfServer:
         except OSError:
             pass
 
-    def append_chat(self, author: str, message: str, system: bool = False):
-        entry = {"author": author, "message": message[:220], "system": system}
+    def append_chat(self, author: str, message: str, system: bool = False, wolf_only: bool = False):
+        entry = {"author": author, "message": message[:220], "system": system, "wolf_only": wolf_only}
         self.chat_history.append(entry)
-        self.chat_history = self.chat_history[-80:]   # conserve les 80 derniers messages
+        self.chat_history = self.chat_history[-80:]
 
     def broadcast_snapshots(self):
         for player in self.players:
@@ -116,23 +116,32 @@ class WerewolfServer:
         alive_players = [p for p in self.players if p["alive"]]
         wolves_alive  = [p for p in alive_players if is_wolf_role(p["role"])]
         current_role  = player["role"] if self.game_started else None
+        is_wolf = is_wolf_role(current_role) if current_role else False
         can_act = False
         action_hint = ""
 
         if self.phase == "night" and player["alive"]:
             if is_wolf_role(current_role):
                 can_act = True
-                action_hint = "Choisis une victime parmi les joueurs vivants."
+                action_hint = "Choisissez une victime parmi les joueurs vivants."
             elif current_role == "Voyante" and not self.pending_night.get("seer_done", False):
                 can_act = True
-                action_hint = "Choisis un joueur pour decouvrir son role."
+                action_hint = "Choisissez un joueur pour découvrir son rôle."
             elif current_role == "Sorcière":
                 if not self.pending_night.get("witch_done", False):
                     can_act = True
-                    action_hint = "Tu peux sauver la victime ou empoisonner un joueur."
+                    heal_ok  = not self.witch_heal_used
+                    poison_ok = not self.witch_poison_used
+                    parts = []
+                    if heal_ok:
+                        parts.append("sauver la victime")
+                    if poison_ok:
+                        parts.append("empoisonner un joueur")
+                    action_hint = ("Vous pouvez " + " ou ".join(parts) + "."
+                                   if parts else "Passez votre tour.")
         elif self.phase == "day" and player["alive"]:
             can_act = True
-            action_hint = "Vote contre un joueur que tu suspectes."
+            action_hint = "Votez contre un joueur que vous suspectez."
 
         night_target_name = None
         if (self.pending_wolf_target is not None
@@ -140,28 +149,53 @@ class WerewolfServer:
                 and self.pending_wolf_target < len(self.players)):
             night_target_name = self.players[self.pending_wolf_target]["name"]
 
+        # Potions disponibles (uniquement communiquées à la sorcière)
+        witch_heal_available   = (current_role == "Sorcière" and not self.witch_heal_used)
+        witch_poison_available = (current_role == "Sorcière" and not self.witch_poison_used)
+
+        # Chat : la nuit seuls les loups peuvent écrire
+        can_chat = True
+        if self.phase == "night" and self.game_started and player["alive"]:
+            can_chat = is_wolf
+
+        # Filtrer les messages loup-only pour les non-loups
+        if is_wolf:
+            visible_chat = list(self.chat_history)
+        else:
+            visible_chat = [e for e in self.chat_history if not e.get("wolf_only")]
+
+        # Progression des votes du jour (feedback au joueur)
+        has_voted = (player_id in self.day_votes) if self.phase == "day" else False
+
         return {
-            "type":           "state_sync",
-            "server_name":    self.server_name,
-            "phase":          self.phase,
-            "day_count":      self.day_count,
-            "your_id":        player_id,
-            "host_id":        self.host_id,
-            "players":        serialize_players_for(player_id, self.players,
-                                                    reveal_all=(self.winner is not None)),
-            "game_started":   self.game_started,
-            "winner":         self.winner,
-            "message":        self.message,
-            "last_deaths":    list(self.last_deaths),
-            "night_target_name": night_target_name,
-            "can_act":        can_act,
-            "action_hint":    action_hint,
-            "seer_result":    self.pending_night.get(("seer_result", player_id)),
-            "wolf_count":     len(wolves_alive),
-            "connected_count": self.connected_player_count(),
-            "max_players":    self.max_players,
-            "role_config":    self.role_config,
-            "chat_history":   list(self.chat_history),
+            "type":                  "state_sync",
+            "server_name":           self.server_name,
+            "phase":                 self.phase,
+            "day_count":             self.day_count,
+            "your_id":               player_id,
+            "host_id":               self.host_id,
+            "players":               serialize_players_for(player_id, self.players,
+                                                           reveal_all=(self.winner is not None)),
+            "game_started":          self.game_started,
+            "winner":                self.winner,
+            "message":               self.message,
+            "last_deaths":           list(self.last_deaths),
+            "night_target_name":     night_target_name,
+            "can_act":               can_act,
+            "action_hint":           action_hint,
+            "seer_result":           self.pending_night.get(("seer_result", player_id)),
+            "wolf_count":            len(wolves_alive),
+            "connected_count":       self.connected_player_count(),
+            "max_players":           self.max_players,
+            "role_config":           self.role_config,
+            "chat_history":          visible_chat,
+            "witch_heal_available":  witch_heal_available,
+            "witch_poison_available": witch_poison_available,
+            "can_chat":              can_chat,
+            "has_voted":             has_voted,
+            "votes_cast":            len(self.day_votes),
+            "votes_needed":          len([p for p in self.players
+                                          if p.get("connected") and p["alive"]]),
         }
 
     # ── Gestion des connexions ────────────────────────────────────────────────
@@ -432,14 +466,28 @@ class WerewolfServer:
         if not raw:
             return self.player_snapshot(player_id)
         raw = raw[:220]
+
+        player = self.players[player_id] if player_id < len(self.players) else None
+        if player is None:
+            return self.player_snapshot(player_id)
+
+        # La nuit : seuls les loups peuvent écrire
+        if self.phase == "night" and self.game_started:
+            if not is_wolf_role(player.get("role", "")):
+                return {"type": "error",
+                        "message": "Seuls les loups-garous peuvent parler la nuit."}
+
         clean, flagged = self.moderator.moderate(raw)
-        author = (self.players[player_id]["name"]
-                  if player_id < len(self.players) else f"Joueur {player_id + 1}")
+        author = player.get("name", f"Joueur {player_id + 1}")
         if flagged:
             clean = "*" * len(raw)
-        self.append_chat(author, clean)
+
+        wolf_only = (self.phase == "night" and self.game_started
+                     and is_wolf_role(player.get("role", "")))
+
+        self.append_chat(author, clean, wolf_only=wolf_only)
         if flagged:
-            self.append_chat("Systeme", f"Message de {author} modere.", system=True)
+            self.append_chat("Systeme", f"Message de {author} modéré.", system=True)
         self.broadcast_snapshots()
         return self.player_snapshot(player_id)
 

@@ -13,12 +13,17 @@ MAX_PLAYERS = 12
 
 # Catalogue complet des rôles : chaque entrée définit le camp, l'aura,
 # le nombre maximum autorisé, et si le rôle agit la nuit.
+# weight = puissance du rôle en équivalent-villageois.
+# Les loups ont un poids élevé (ils tuent la nuit ET votent le jour).
+# Les rôles village spéciaux ont un poids > 1.0.
+# Villageois de base = 1.0 (référence).
 ROLE_CATALOG = {
     "Loup-garou": {
         "camp": "Loups",
         "aura": "Sombre",
-        "max": 11,
+        "max": 4,
         "night_action": True,
+        "weight": 2.2,
         "description": "Chaque nuit, les loups-garous choisissent ensemble une victime parmi les autres joueurs vivants.",
         "ui_icon": "LG",
     },
@@ -27,6 +32,7 @@ ROLE_CATALOG = {
         "aura": "Sombre",
         "max": 1,
         "night_action": False,
+        "weight": 2.5,
         "description": "Rôle de loup spécial. Dans cette version, il compte comme un loup supplémentaire dans le camp des loups.",
         "ui_icon": "IP",
     },
@@ -35,6 +41,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": True,
+        "weight": 1.8,
         "description": "Chaque nuit, vous pouvez choisir un joueur pour découvrir son rôle.",
         "ui_icon": "VO",
     },
@@ -43,6 +50,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": False,
+        "weight": 1.1,
         "description": "Lors de la première nuit, vous pouvez former un couple amoureux. Dans cette version, le rôle est attribué et affiché, mais son pouvoir n'est pas encore jouable.",
         "ui_icon": "CU",
     },
@@ -51,6 +59,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": True,
+        "weight": 2.0,
         "description": "Vous avez une potion de soin et une potion de mort. Vous pouvez sauver la victime des loups ou empoisonner un joueur.",
         "ui_icon": "SO",
     },
@@ -59,6 +68,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": False,
+        "weight": 1.4,
         "description": "Lorsque vous mourrez, vous pouvez éliminer un autre joueur.",
         "ui_icon": "CH",
     },
@@ -67,6 +77,7 @@ ROLE_CATALOG = {
         "aura": "Inconnue",
         "max": 1,
         "night_action": False,
+        "weight": 1.0,
         "description": "Une cible vous est attribuée. Vous gagnez si elle est éliminée par le vote du village avant votre mort. Condition spéciale non encore jouable dans cette version.",
         "ui_icon": "SN",
     },
@@ -75,6 +86,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": False,
+        "weight": 1.3,
         "description": "Chaque nuit, il protège une personne différente. Dans cette version, le rôle est attribué mais le pouvoir n'est pas encore jouable.",
         "ui_icon": "SA",
     },
@@ -83,6 +95,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": False,
+        "weight": 1.2,
         "description": "Il peut sentir parmi trois personnes si un loup se cache entre elles. Dans cette version, le rôle est attribué mais le pouvoir n'est pas encore jouable.",
         "ui_icon": "RE",
     },
@@ -91,6 +104,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": False,
+        "weight": 0.8,
         "description": "Il choisit un mentor en début de partie et devient loup si ce mentor meurt. Dans cette version, le rôle est attribué mais le basculement n'est pas encore jouable.",
         "ui_icon": "ES",
     },
@@ -99,6 +113,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 1,
         "night_action": False,
+        "weight": 0.8,
         "description": "Villageois au départ, il devient loup si les loups tentent de le tuer. Dans cette version, le rôle est attribué mais la conversion n'est pas encore jouable.",
         "ui_icon": "VM",
     },
@@ -107,6 +122,7 @@ ROLE_CATALOG = {
         "aura": "Inconnue",
         "max": 1,
         "night_action": False,
+        "weight": 1.1,
         "description": "La sirène envoûte des joueurs puis peut les tuer. Dans cette version, le rôle est attribué mais le pouvoir complet n'est pas encore jouable.",
         "ui_icon": "SI",
     },
@@ -115,6 +131,7 @@ ROLE_CATALOG = {
         "aura": "Inconnue",
         "max": 1,
         "night_action": False,
+        "weight": 1.3,
         "description": "Chaque nuit, il peut recouvrir des joueurs d'essence ou brûler ceux déjà marqués. Dans cette version, le rôle est attribué mais le pouvoir complet n'est pas encore jouable.",
         "ui_icon": "PY",
     },
@@ -123,6 +140,7 @@ ROLE_CATALOG = {
         "aura": "Claire",
         "max": 99,
         "night_action": False,
+        "weight": 1.0,
         "description": "Le villageois n'a pas de pouvoir spécial et vote le jour pour éliminer les loups.",
         "ui_icon": "VI",
     },
@@ -209,17 +227,53 @@ def role_config_error(player_count, role_config=None):
 
 
 def camp_balance(player_count, role_config=None):
-    """Calcule le ratio village/loups pour l'UI d'équilibre du lobby."""
+    """Calcule le ratio d'équilibre village/loups en tenant compte des poids des rôles.
+
+    Le poids reflète la puissance réelle du rôle :
+      - Loup-garou (2.2) : tue la nuit ET vote le jour
+      - Sorcière (2.0) : 2 potions cumulées
+      - Voyante (1.8) : information cruciale
+      - Villageois (1.0) : référence de base
+    """
     config = normalize_role_config(role_config)
-    wolves = config.get("Loup-garou", 0) + config.get("Infect Père des Loups", 0)
-    others = sum(config.values()) - wolves
-    village = max(0, player_count - wolves)
-    if player_count <= 0:
-        return {"village_ratio": 0.5, "wolves_ratio": 0.5, "counts": {"Villageois": 0, "Loups": 0}}
+    wolf_power    = 0.0
+    village_power = 0.0
+
+    n_wolves = 0
+    n_village_specials = 0
+
+    for role, count in config.items():
+        if count == 0:
+            continue
+        det = ROLE_CATALOG.get(role, {})
+        w   = det.get("weight", 1.0)
+        camp = det.get("camp", "Village")
+        if camp == "Loups":
+            wolf_power += w * count
+            n_wolves += count
+        else:
+            village_power += w * count
+            n_village_specials += count
+
+    # Villageois de base (remplissage)
+    n_plain_villagers = max(0, player_count - n_wolves - n_village_specials)
+    village_power += n_plain_villagers * ROLE_CATALOG["Villageois"]["weight"]
+
+    total = wolf_power + village_power
+    if total <= 0 or player_count <= 0:
+        return {"village_ratio": 0.5, "wolves_ratio": 0.5,
+                "counts": {"Villageois": 0, "Loups": 0}}
+
+    village_ratio = village_power / total
+    wolf_ratio    = wolf_power    / total
     return {
-        "village_ratio": village / player_count,
-        "wolves_ratio":  wolves / player_count,
-        "counts": {"Villageois": village, "Loups": wolves, "Specials": others},
+        "village_ratio": village_ratio,
+        "wolves_ratio":  wolf_ratio,
+        "counts": {
+            "Villageois": player_count - n_wolves,
+            "Loups":      n_wolves,
+            "Specials":   n_village_specials,
+        },
     }
 
 
