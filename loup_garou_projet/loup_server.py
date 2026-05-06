@@ -76,6 +76,7 @@ class WerewolfServer:
         self.witch_heal_used = False
         self.witch_poison_used = False
         self.pending_wolf_target = None
+        self.night_step = "wolves"  # "wolves" → "seer" → "witch" → "done"
 
     def _ensure_slot(self, player_id: int):
         """Étend clients[] pour que l'index player_id existe (liste dynamique)."""
@@ -121,13 +122,17 @@ class WerewolfServer:
         action_hint = ""
 
         if self.phase == "night" and player["alive"]:
-            if is_wolf_role(current_role):
+            if is_wolf_role(current_role) and self.night_step == "wolves":
                 can_act = True
-                action_hint = "Choisissez une victime parmi les joueurs vivants."
-            elif current_role == "Voyante" and not self.pending_night.get("seer_done", False):
+                wolves = [p for p in self.players if p.get("connected") and p["alive"] and is_wolf_role(p["role"])]
+                if player_id in self.wolf_votes and len(wolves) > 1:
+                    action_hint = "Vote enregistré. En attente des autres loups-garous..."
+                else:
+                    action_hint = "Choisissez une victime parmi les joueurs vivants."
+            elif current_role == "Voyante" and self.night_step == "seer" and not self.pending_night.get("seer_done", False):
                 can_act = True
                 action_hint = "Choisissez un joueur pour découvrir son rôle."
-            elif current_role == "Sorcière":
+            elif current_role == "Sorcière" and self.night_step == "witch":
                 if not self.pending_night.get("witch_done", False):
                     can_act = True
                     heal_ok  = not self.witch_heal_used
@@ -139,6 +144,16 @@ class WerewolfServer:
                         parts.append("empoisonner un joueur")
                     action_hint = ("Vous pouvez " + " ou ".join(parts) + "."
                                    if parts else "Passez votre tour.")
+            else:
+                # Ce n'est pas notre tour : afficher l'étape en cours
+                step_labels = {
+                    "wolves": "des Loups-garous",
+                    "seer":   "de la Voyante",
+                    "witch":  "de la Sorcière",
+                }
+                label = step_labels.get(self.night_step, "")
+                if label:
+                    action_hint = f"En attente du tour {label}..."
         elif self.phase == "day" and player["alive"]:
             can_act = True
             action_hint = "Votez contre un joueur que vous suspectez."
@@ -196,6 +211,7 @@ class WerewolfServer:
             "votes_cast":            len(self.day_votes),
             "votes_needed":          len([p for p in self.players
                                           if p.get("connected") and p["alive"]]),
+            "night_step":            self.night_step,
         }
 
     # ── Gestion des connexions ────────────────────────────────────────────────
@@ -309,8 +325,27 @@ class WerewolfServer:
         self.wolf_votes = {}
         self.day_votes  = {}
         self.pending_wolf_target = None
-        self.message = f"Nuit {self.day_count} : les roles de nuit agissent."
+        self.night_step = "wolves"
+        self._advance_if_no_role()
+        self.message = f"Nuit {self.day_count} : les rôles de nuit agissent dans l'ordre."
         self.broadcast_snapshots()
+
+    def _advance_if_no_role(self):
+        """Saute les étapes dont le rôle n'est pas présent parmi les joueurs vivants connectés."""
+        connected = [p for p in self.players if p.get("connected")]
+        while self.night_step != "done":
+            if self.night_step == "wolves":
+                if any(p["alive"] and is_wolf_role(p["role"]) for p in connected):
+                    break
+                self.night_step = "seer"
+            elif self.night_step == "seer":
+                if any(p["alive"] and p["role"] == "Voyante" for p in connected):
+                    break
+                self.night_step = "witch"
+            elif self.night_step == "witch":
+                if any(p["alive"] and p["role"] == "Sorcière" for p in connected):
+                    break
+                self.night_step = "done"
 
     def resolve_wolves_if_ready(self) -> bool:
         """
@@ -326,25 +361,13 @@ class WerewolfServer:
         return self.pending_wolf_target is not None or not wolves
 
     def resolve_night_if_ready(self):
-        """
-        Résout la nuit uniquement quand tous les rôles de nuit ont agi.
-        Le all() vérifie : soit le joueur n'a pas ce rôle, soit il est mort,
-        soit il a déjà effectué son action (seer_done / witch_done).
-        """
-        wolves_ready = self.resolve_wolves_if_ready()
-        seer_ready   = all(
-            p["role"] != "Voyante" or not p["alive"]
-            or self.pending_night.get("seer_done", False)
-            for p in self.players if p.get("connected")
-        )
-        witch_ready  = all(
-            p["role"] != "Sorcière" or not p["alive"]
-            or self.pending_night.get("witch_done", False)
-            for p in self.players if p.get("connected")
-        )
-        if not (wolves_ready and seer_ready and witch_ready):
+        """Vérifie que toutes les étapes sont terminées, puis résout la nuit."""
+        if self.night_step != "done":
             return
+        self._resolve_night()
 
+    def _resolve_night(self):
+        """Applique les morts de la nuit et passe en phase de jour."""
         deaths: set = set()
         if (self.pending_wolf_target is not None
                 and not self.pending_night.get("saved", False)):
@@ -365,7 +388,7 @@ class WerewolfServer:
             self.message = f"Victoire du camp : {self.winner} !"
         else:
             self.phase = "day"
-            self.message = ("Jour : " + ", ".join(self.last_deaths) + " elimine(s). Votez."
+            self.message = ("Jour : " + ", ".join(self.last_deaths) + " éliminé(s). Votez."
                             if self.last_deaths else "Jour : personne n'est mort cette nuit. Votez.")
         self.broadcast_snapshots()
 
@@ -376,59 +399,87 @@ class WerewolfServer:
             return {"type": "error", "message": "Ce n'est pas la nuit."}
         player = self.players[player_id]
         if not player["alive"]:
-            return {"type": "error", "message": "Tu es elimine."}
+            return {"type": "error", "message": "Tu es éliminé."}
         action = msg.get("action")
         target = msg.get("target")
 
         if action == "wolf_kill":
             if not is_wolf_role(player["role"]):
-                return {"type": "error", "message": "Action reservee aux loups."}
+                return {"type": "error", "message": "Action réservée aux loups-garous."}
+            if self.night_step != "wolves":
+                return {"type": "error", "message": "Ce n'est pas encore le tour des loups."}
             if target == player_id or target not in self.alive_ids():
                 return {"type": "error", "message": "Cible invalide."}
             self.wolf_votes[player_id] = target
-            self.resolve_night_if_ready()
+            wolves = [p for p in self.players
+                      if p.get("connected") and p["alive"] and is_wolf_role(p["role"])]
+            if len(self.wolf_votes) == len(wolves):
+                counts = Counter(self.wolf_votes.values())
+                self.pending_wolf_target = max(counts.items(), key=lambda x: (x[1], -x[0]))[0]
+                self.night_step = "seer"
+                self._advance_if_no_role()
+                if self.night_step == "done":
+                    self._resolve_night()
+                else:
+                    self.broadcast_snapshots()
             return self.player_snapshot(player_id)
 
         if action == "seer_peek":
             if player["role"] != "Voyante" or self.pending_night.get("seer_done", False):
-                return {"type": "error", "message": "Action voyante indisponible."}
+                return {"type": "error", "message": "Action Voyante indisponible."}
+            if self.night_step != "seer":
+                return {"type": "error", "message": "Ce n'est pas encore le tour de la Voyante."}
             if target not in self.alive_ids() or target == player_id:
                 return {"type": "error", "message": "Cible invalide."}
             result = f"{self.players[target]['name']} est {self.players[target]['role']}."
             self.pending_night[("seer_result", player_id)] = result
             self.pending_night["seer_done"] = True
-            self.resolve_night_if_ready()
+            self.night_step = "witch"
+            self._advance_if_no_role()
+            if self.night_step == "done":
+                self._resolve_night()
+            else:
+                self.broadcast_snapshots()
             return self.player_snapshot(player_id)
 
         if action == "witch_save":
             if player["role"] != "Sorcière" or self.pending_night.get("witch_done", False):
-                return {"type": "error", "message": "Action sorciere indisponible."}
+                return {"type": "error", "message": "Action Sorcière indisponible."}
+            if self.night_step != "witch":
+                return {"type": "error", "message": "Ce n'est pas encore le tour de la Sorcière."}
             if self.witch_heal_used:
-                return {"type": "error", "message": "Potion de soin deja utilisee."}
+                return {"type": "error", "message": "Potion de soin déjà utilisée."}
             self.pending_night["saved"]      = True
             self.pending_night["witch_done"] = True
             self.witch_heal_used = True
-            self.resolve_night_if_ready()
+            self.night_step = "done"
+            self._resolve_night()
             return self.player_snapshot(player_id)
 
         if action == "witch_poison":
             if player["role"] != "Sorcière" or self.pending_night.get("witch_done", False):
-                return {"type": "error", "message": "Action sorciere indisponible."}
+                return {"type": "error", "message": "Action Sorcière indisponible."}
+            if self.night_step != "witch":
+                return {"type": "error", "message": "Ce n'est pas encore le tour de la Sorcière."}
             if self.witch_poison_used:
-                return {"type": "error", "message": "Potion de mort deja utilisee."}
+                return {"type": "error", "message": "Potion de mort déjà utilisée."}
             if target not in self.alive_ids() or target == player_id:
                 return {"type": "error", "message": "Cible invalide."}
             self.pending_night["poison_target"] = target
             self.pending_night["witch_done"]    = True
             self.witch_poison_used = True
-            self.resolve_night_if_ready()
+            self.night_step = "done"
+            self._resolve_night()
             return self.player_snapshot(player_id)
 
         if action == "witch_skip":
             if player["role"] != "Sorcière" or self.pending_night.get("witch_done", False):
-                return {"type": "error", "message": "Action sorciere indisponible."}
+                return {"type": "error", "message": "Action Sorcière indisponible."}
+            if self.night_step != "witch":
+                return {"type": "error", "message": "Ce n'est pas encore le tour de la Sorcière."}
             self.pending_night["witch_done"] = True
-            self.resolve_night_if_ready()
+            self.night_step = "done"
+            self._resolve_night()
             return self.player_snapshot(player_id)
 
         return {"type": "error", "message": "Action inconnue."}
@@ -455,7 +506,7 @@ class WerewolfServer:
                 self.message = (f"{self.players[chosen]['name']} elimine. "
                                 f"Victoire : {self.winner} !")
             else:
-                self.message = f"{self.players[chosen]['name']} elimine. La nuit tombe..."
+                self.message = f"{self.players[chosen]['name']} éliminé. La nuit tombe..."
                 self.start_night()
                 return self.player_snapshot(player_id)
         self.broadcast_snapshots()

@@ -144,6 +144,7 @@ class WerewolfOnlineGame:
         self.votes_needed      = 0
         self.witch_heal_available   = True
         self.witch_poison_available = True
+        self.night_step        = "wolves"
         self.max_players       = 8
         self.role_config       = normalize_role_config({})
         self.chat_history: list = []
@@ -273,6 +274,7 @@ class WerewolfOnlineGame:
                 self.max_players       = msg.get("max_players", self.max_players)
                 self.witch_heal_available   = msg.get("witch_heal_available", self.witch_heal_available)
                 self.witch_poison_available = msg.get("witch_poison_available", self.witch_poison_available)
+                self.night_step  = msg.get("night_step", "wolves")
                 self.role_config = normalize_role_config(
                     msg.get("role_config", self.role_config))
 
@@ -742,7 +744,11 @@ class WerewolfOnlineGame:
             pygame.draw.rect(self.screen, GOLD_WARM, sr, 1, border_radius=14)
             draw_text(self.screen, f"Cible : {tgt_name}", f["xs"], GOLD_WARM, center=sr.center)
 
-        y = self.center_rect.y + 100
+        # Indicateur d'ordre des tours (nuit uniquement)
+        if self.phase == "night":
+            self._draw_night_steps(f, sy=self.center_rect.y + 90)
+
+        y = self.center_rect.y + (122 if self.phase == "night" else 100)
 
         def line(txt, col):
             nonlocal y
@@ -799,6 +805,35 @@ class WerewolfOnlineGame:
             vote_ok = (self.can_act and self.selected_target is not None
                        and not self.has_voted)
             self.btn_vote.draw(self.screen, f["small"], mouse, enabled=vote_ok)
+
+    def _draw_night_steps(self, f: dict, sy: int):
+        """Affiche la progression des tours de nuit : Loups → Voyante → Sorcière."""
+        steps = [
+            ("wolves", "LOUPS",    WOLF_RED),
+            ("seer",   "VOYANTE",  CYAN_COOL),
+            ("witch",  "SORCIÈRE", (160, 60, 180)),
+        ]
+        total_w = self.center_rect.width - 40
+        pill_w  = total_w // 3 - 8
+        pill_h  = 24
+        sx      = self.center_rect.x + 20
+        for i, (step, label, col) in enumerate(steps):
+            px      = sx + i * (pill_w + 8)
+            is_cur  = (step == self.night_step)
+            pill    = pygame.Rect(px, sy, pill_w, pill_h)
+            surf    = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+            bg_col  = (*col, 210) if is_cur else (40, 32, 60, 130)
+            pygame.draw.rect(surf, bg_col, (0, 0, pill_w, pill_h), border_radius=11)
+            if is_cur:
+                pygame.draw.rect(surf, (*col, 255), (0, 0, pill_w, pill_h), 2, border_radius=11)
+            self.screen.blit(surf, pill.topleft)
+            txt_col = WHITE_SOFT if is_cur else GREY_DIM
+            draw_text(self.screen, label, f["xs"], txt_col, center=pill.center)
+            # Flèche entre les étapes
+            if i < len(steps) - 1:
+                ax = px + pill_w + 2
+                ay = sy + pill_h // 2
+                draw_text(self.screen, "›", f["xs"], GREY_DIM, center=(ax + 4, ay))
 
     def _draw_witch_buttons(self, f: dict, mouse):
         save_ok   = (self.witch_heal_available and self.night_target_name is not None)
