@@ -13,9 +13,9 @@ import pygame
 
 from loup_shared import (
     MIN_PLAYERS, MAX_PLAYERS,
-    ROLE_CATALOG, CLASSIC_ROLE_NAMES, SPECIAL_ROLE_NAMES,
+    ROLE_CATALOG, CLASSIC_ROLE_NAMES, SPECIAL_ROLE_NAMES, AVAILABLE_ROLES,
     camp_balance, min_players_for_config, normalize_role_config, role_config_error,
-    is_wolf_role,
+    is_wolf_role, is_wolf_player,
 )
 from loup_ui_theme import (
     WOLF_RED, BLOOD_RED,
@@ -144,6 +144,7 @@ class WerewolfOnlineGame:
         self.votes_needed      = 0
         self.witch_heal_available   = True
         self.witch_poison_available = True
+        self.father_can_infect = False
         self.night_step        = "wolves"
         self.max_players       = 8
         self.role_config       = normalize_role_config({})
@@ -158,8 +159,10 @@ class WerewolfOnlineGame:
         self.btn_vote        = Button("VALIDER L'ACTION",    BTN_PRIMARY, BTN_PRIMARY_H)
         self.btn_sync        = Button("SYNC",                BTN_NEUTRAL, BTN_NEUTRAL_H)
         self.btn_skip        = Button("PASSER",              BTN_NEUTRAL, BTN_NEUTRAL_H)
-        self.btn_save        = Button("SAUVER LA VICTIME",   BTN_SUCCESS, BTN_SUCCESS_H)
-        self.btn_poison      = Button("EMPOISONNER",         (90, 24, 80), (120, 38, 108))
+        self.btn_save          = Button("SAUVER LA VICTIME",   BTN_SUCCESS,    BTN_SUCCESS_H)
+        self.btn_poison        = Button("EMPOISONNER",         (90, 24, 80),  (120, 38, 108))
+        self.btn_father_infect = Button("INFECTER",            (140, 60, 10), (180, 90, 20))
+        self.btn_father_skip   = Button("PASSER",              BTN_NEUTRAL,   BTN_NEUTRAL_H)
         self.btn_send_chat   = Button("ENVOYER",             BTN_PRIMARY, BTN_PRIMARY_H)
         self.btn_end         = Button("RETOUR AU MENU",      BTN_NEUTRAL, BTN_NEUTRAL_H)
         self.chat_input      = InputBox(placeholder="Écris un message...", max_len=220)
@@ -209,9 +212,14 @@ class WerewolfOnlineGame:
 
         # Boutons sorcière (3 colonnes égales)
         wb = max(70, full_w // 3 - 6)
-        self.btn_save.set_rect  ((bx,            by, wb, 44))
-        self.btn_poison.set_rect((bx + wb + 8,   by, wb, 44))
+        self.btn_save.set_rect  ((bx,             by, wb, 44))
+        self.btn_poison.set_rect((bx + wb + 8,    by, wb, 44))
         self.btn_skip.set_rect  ((bx + wb*2 + 16, by, max(60, full_w - wb*2 - 16), 44))
+
+        # Boutons Père des Loups (2 colonnes)
+        fw = max(90, full_w // 2 - 6)
+        self.btn_father_infect.set_rect((bx,          by, fw, 44))
+        self.btn_father_skip.set_rect  ((bx + fw + 8, by, max(60, full_w - fw - 8), 44))
 
         # Bouton fin de partie
         ew = min(300, full_w)
@@ -274,6 +282,7 @@ class WerewolfOnlineGame:
                 self.max_players       = msg.get("max_players", self.max_players)
                 self.witch_heal_available   = msg.get("witch_heal_available", self.witch_heal_available)
                 self.witch_poison_available = msg.get("witch_poison_available", self.witch_poison_available)
+                self.father_can_infect = msg.get("father_can_infect", False)
                 self.night_step  = msg.get("night_step", "wolves")
                 self.role_config = normalize_role_config(
                     msg.get("role_config", self.role_config))
@@ -308,6 +317,10 @@ class WerewolfOnlineGame:
     def _send_role_config_update(self, role_name: str, delta: int):
         if not self.is_host() or self.phase != "lobby":
             return
+        # Villageois contrôle max_players (nombre de villageois = max - autres rôles)
+        if role_name == "Villageois":
+            self._send_max_players_update(delta)
+            return
         new = dict(self.role_config)
         cur = new.get(role_name, 0)
         mx  = ROLE_CATALOG[role_name]["max"]
@@ -315,7 +328,7 @@ class WerewolfOnlineGame:
         if role_name == "Loup-garou":
             val = max(1, val)
         new[role_name] = val
-        if sum(new.values()) >= MAX_PLAYERS:
+        if sum(new.values()) > MAX_PLAYERS:
             self.message = f"Trop de roles (max {MAX_PLAYERS} joueurs)."
             return
         if min_players_for_config(new) > MAX_PLAYERS:
@@ -363,6 +376,12 @@ class WerewolfOnlineGame:
 
     def send_witch_skip(self):
         self.network.send({"type": "night_action", "action": "witch_skip"})
+
+    def send_father_infect(self):
+        self.network.send({"type": "night_action", "action": "father_infect"})
+
+    def send_father_skip(self):
+        self.network.send({"type": "night_action", "action": "father_skip"})
 
     def send_witch_save(self):
         self.network.send({"type": "night_action", "action": "witch_save"})
@@ -433,12 +452,15 @@ class WerewolfOnlineGame:
             pygame.draw.rect(self.screen, MIST_LIGHT if sel else (44, 36, 70),
                              rect, 2, border_radius=12)
 
-            # Logique de révélation correcte (parenthèses explicites)
-            both_wolves = is_wolf_role(my_role) and is_wolf_role(p.get("role", ""))
-            reveal = dead or is_me or both_wolves
+            # Révélation : on voit son propre rôle, les coéquipiers loups/infectés, et les morts
+            my_player = next((pl for pl in self.players if pl["id"] == self.your_id), {})
+            i_am_wolf_side = is_wolf_player(my_player)
+            p_is_wolf_side = is_wolf_player(p)
+            reveal = dead or is_me or (p_is_wolf_side and i_am_wolf_side)
             role_str = (p.get("revealed_role") or p.get("role") or "?") if reveal else "?"
+            infected_str = " (Infecté)" if (reveal and p.get("infected") and not is_wolf_role(p.get("role", ""))) else ""
 
-            bc = ROLE_WOLF_CLR if is_wolf_role(role_str) else MIST_PURPLE
+            bc = ROLE_WOLF_CLR if (is_wolf_role(role_str) or p.get("infected")) else MIST_PURPLE
             badge = pygame.Rect(rect.x + 7, rect.y + 9, 36, 28)
             pygame.draw.rect(self.screen, bc, badge, border_radius=8)
             draw_text(self.screen,
@@ -448,8 +470,9 @@ class WerewolfOnlineGame:
             name_col = GREY_DARK if dead else (GOLD_WARM if is_me else WHITE_SOFT)
             draw_text(self.screen, p["name"], f["xs"], name_col,
                       topleft=(rect.x + 50, rect.y + 5))
-            draw_text(self.screen,
-                      ("Elimine - " + role_str) if dead else role_str,
+            role_display = (("Elimine - " + role_str) if dead
+                            else (role_str + infected_str))
+            draw_text(self.screen, role_display,
                       f["xs"], WOLF_RED if dead else CYAN_COOL,
                       topleft=(rect.x + 50, rect.y + 24))
             if is_me:
@@ -510,11 +533,17 @@ class WerewolfOnlineGame:
         draw_text(self.screen, f"Connectes : {len(self.players)}/{self.max_players}",
                   f["xs"], CYAN_COOL, topleft=(rect.x, rect.y + 54))
 
+    def _villager_count(self) -> int:
+        """Nombre de Villageois calculé = max_players - somme des autres rôles configurés."""
+        special_count = sum(v for k, v in self.role_config.items() if k in AVAILABLE_ROLES)
+        return max(0, self.max_players - special_count)
+
     def draw_role_rows(self, f: dict):
         self.role_row_rects   = {}
         self.role_minus_rects = {}
         self.role_plus_rects  = {}
 
+        # CLASSIC_ROLE_NAMES inclut "Villageois" — affiché en dernier des classiques
         sections = [("Roles classiques", CLASSIC_ROLE_NAMES),
                     ("Roles speciaux",   SPECIAL_ROLE_NAMES)]
         ROW_H   = 46
@@ -582,16 +611,25 @@ class WerewolfOnlineGame:
             cnt_r = pygame.Rect(row.right - 128, row.y + 7, 38, 28)
             min_r = pygame.Rect(row.right - 84,  row.y + 7, 30, 28)
             pls_r = pygame.Rect(row.right - 46,  row.y + 7, 30, 28)
-            en    = self.is_host()
-            for r2, sym, col in [(min_r, "-", BTN_DANGER   if en else GREY_DARK),
-                                  (pls_r, "+", BTN_SUCCESS  if en else GREY_DARK)]:
+            is_host = self.is_host()
+            # Villageois : - désactivé à 0, + désactivé au max joueurs
+            if rn == "Villageois":
+                minus_en = is_host and self._villager_count() > 0
+                plus_en  = is_host and self.max_players < MAX_PLAYERS
+            else:
+                minus_en = is_host
+                plus_en  = is_host
+            for r2, sym, en_btn in [(min_r, "-", minus_en), (pls_r, "+", plus_en)]:
+                col = (BTN_DANGER if sym == "-" else BTN_SUCCESS) if en_btn else GREY_DARK
                 pygame.draw.rect(self.screen, col, r2, border_radius=9)
                 pygame.draw.rect(self.screen, BTN_BORDER, r2, 1, border_radius=9)
-                draw_text(self.screen, sym, f["xs"], WHITE_SOFT if en else GREY_DIM,
+                draw_text(self.screen, sym, f["xs"], WHITE_SOFT if en_btn else GREY_DIM,
                           center=r2.center)
             pygame.draw.rect(self.screen, (10, 8, 22), cnt_r, border_radius=9)
             pygame.draw.rect(self.screen, BTN_BORDER, cnt_r, 1, border_radius=9)
-            draw_text(self.screen, str(self.role_config.get(rn, 0)), f["xs"], MOON_SILVER,
+            display_count = (self._villager_count() if rn == "Villageois"
+                             else self.role_config.get(rn, 0))
+            draw_text(self.screen, str(display_count), f["xs"], MOON_SILVER,
                       center=cnt_r.center)
 
             self.role_row_rects[rn]   = row
@@ -796,8 +834,13 @@ class WerewolfOnlineGame:
             y += 17
 
         # ---- Boutons d'action
-        is_witch = role.startswith("Sorci") and self.phase == "night" and self.can_act
-        if is_witch:
+        is_witch  = role.startswith("Sorci") and self.phase == "night" and self.can_act
+        is_father = (role == "Infect Père des Loups"
+                     and self.phase == "night" and self.can_act
+                     and self.night_step == "father")
+        if is_father:
+            self._draw_father_buttons(f, mouse)
+        elif is_witch:
             self._draw_witch_buttons(f, mouse)
         elif self.phase in ("night", "day"):
             lbl = "VALIDER LE VOTE" if self.phase == "day" else "VALIDER L'ACTION"
@@ -807,14 +850,16 @@ class WerewolfOnlineGame:
             self.btn_vote.draw(self.screen, f["small"], mouse, enabled=vote_ok)
 
     def _draw_night_steps(self, f: dict, sy: int):
-        """Affiche la progression des tours de nuit : Loups → Voyante → Sorcière."""
+        """Affiche la progression officielle Thiercelieux : Voyante → Loups → Père → Sorcière."""
         steps = [
-            ("wolves", "LOUPS",    WOLF_RED),
             ("seer",   "VOYANTE",  CYAN_COOL),
+            ("wolves", "LOUPS",    WOLF_RED),
+            ("father", "PÈRE",     (160, 90, 20)),
             ("witch",  "SORCIÈRE", (160, 60, 180)),
         ]
         total_w = self.center_rect.width - 40
-        pill_w  = total_w // 3 - 8
+        n = len(steps)
+        pill_w  = total_w // n - 8
         pill_h  = 24
         sx      = self.center_rect.x + 20
         for i, (step, label, col) in enumerate(steps):
@@ -829,11 +874,23 @@ class WerewolfOnlineGame:
             self.screen.blit(surf, pill.topleft)
             txt_col = WHITE_SOFT if is_cur else GREY_DIM
             draw_text(self.screen, label, f["xs"], txt_col, center=pill.center)
-            # Flèche entre les étapes
-            if i < len(steps) - 1:
+            if i < n - 1:
                 ax = px + pill_w + 2
                 ay = sy + pill_h // 2
                 draw_text(self.screen, "›", f["xs"], GREY_DIM, center=(ax + 4, ay))
+
+    def _draw_father_buttons(self, f: dict, mouse):
+        infect_ok = self.father_can_infect and self.night_target_name is not None
+        lbl_infect = ("INFECTER " + (self.night_target_name or "")[:10]).strip()
+        self.btn_father_infect.text = lbl_infect
+        self.btn_father_skip.text   = "PASSER"
+        self.btn_father_infect.draw(self.screen, f["xs"], mouse, enabled=infect_ok)
+        self.btn_father_skip.draw  (self.screen, f["xs"], mouse, enabled=True)
+        iy = self.btn_father_infect.rect.y - 18
+        status = "Pouvoir disponible" if self.father_can_infect else "Pouvoir déjà utilisé"
+        draw_text(self.screen, status, f["xs"],
+                  (160, 90, 20) if self.father_can_infect else GREY_DIM,
+                  topleft=(self.btn_father_infect.rect.x, iy))
 
     def _draw_witch_buttons(self, f: dict, mouse):
         save_ok   = (self.witch_heal_available and self.night_target_name is not None)
@@ -1071,7 +1128,17 @@ class WerewolfOnlineGame:
 
         # Actions phase nuit/jour
         role = self.current_role() or ""
-        is_witch = (role == "Sorcière") and self.phase == "night"
+        is_witch  = (role == "Sorcière") and self.phase == "night"
+        is_father = (role == "Infect Père des Loups" and self.phase == "night"
+                     and self.night_step == "father")
+
+        if is_father and self.can_act:
+            if self.btn_father_infect.is_clicked(event.pos):
+                self.send_father_infect()
+                return
+            if self.btn_father_skip.is_clicked(event.pos):
+                self.send_father_skip()
+                return
 
         if is_witch and self.can_act:
             if self.btn_save.is_clicked(event.pos):

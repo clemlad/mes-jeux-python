@@ -18,7 +18,7 @@ from loup_shared import (
     MAX_PLAYERS,
     build_roles,
     check_winner,
-    is_wolf_role,
+    is_wolf_player,
     normalize_role_config,
     role_config_label,
     serialize_players_for,
@@ -75,8 +75,9 @@ class WerewolfServer:
         self.day_votes: dict = {}
         self.witch_heal_used = False
         self.witch_poison_used = False
+        self.father_infect_used = False
         self.pending_wolf_target = None
-        self.night_step = "wolves"  # "wolves" → "seer" → "witch" → "done"
+        self.night_step = "wolves"  # "wolves" → "father" → "seer" → "witch" → "done"
 
     def _ensure_slot(self, player_id: int):
         """Étend clients[] pour que l'index player_id existe (liste dynamique)."""
@@ -115,20 +116,33 @@ class WerewolfServer:
     def player_snapshot(self, player_id: int) -> dict:
         player = self.players[player_id]
         alive_players = [p for p in self.players if p["alive"]]
-        wolves_alive  = [p for p in alive_players if is_wolf_role(p["role"])]
+        wolves_alive  = [p for p in alive_players if is_wolf_player(p)]
         current_role  = player["role"] if self.game_started else None
-        is_wolf = is_wolf_role(current_role) if current_role else False
+        is_wolf = is_wolf_player(player) if self.game_started else False
         can_act = False
         action_hint = ""
+        father_can_infect = False
 
         if self.phase == "night" and player["alive"]:
-            if is_wolf_role(current_role) and self.night_step == "wolves":
+            if is_wolf_player(player) and self.night_step == "wolves":
                 can_act = True
-                wolves = [p for p in self.players if p.get("connected") and p["alive"] and is_wolf_role(p["role"])]
+                wolves = [p for p in self.players if p.get("connected") and p["alive"] and is_wolf_player(p)]
                 if player_id in self.wolf_votes and len(wolves) > 1:
                     action_hint = "Vote enregistré. En attente des autres loups-garous..."
                 else:
                     action_hint = "Choisissez une victime parmi les joueurs vivants."
+            elif current_role == "Infect Père des Loups" and self.night_step == "father":
+                if not self.pending_night.get("father_done", False):
+                    can_act = True
+                    father_can_infect = not self.father_infect_used
+                    if self.pending_wolf_target is not None:
+                        tgt_name = self.players[self.pending_wolf_target]["name"]
+                        if father_can_infect:
+                            action_hint = f"Infectez {tgt_name} ou passez votre tour."
+                        else:
+                            action_hint = "Pouvoir d'infection déjà utilisé. Passez votre tour."
+                    else:
+                        action_hint = "Aucune victime à infecter. Passez votre tour."
             elif current_role == "Voyante" and self.night_step == "seer" and not self.pending_night.get("seer_done", False):
                 can_act = True
                 action_hint = "Choisissez un joueur pour découvrir son rôle."
@@ -145,9 +159,9 @@ class WerewolfServer:
                     action_hint = ("Vous pouvez " + " ou ".join(parts) + "."
                                    if parts else "Passez votre tour.")
             else:
-                # Ce n'est pas notre tour : afficher l'étape en cours
                 step_labels = {
                     "wolves": "des Loups-garous",
+                    "father": "du Père des Loups",
                     "seer":   "de la Voyante",
                     "witch":  "de la Sorcière",
                 }
@@ -160,7 +174,7 @@ class WerewolfServer:
 
         night_target_name = None
         if (self.pending_wolf_target is not None
-                and current_role == "Sorcière"
+                and current_role in ("Sorcière", "Infect Père des Loups")
                 and self.pending_wolf_target < len(self.players)):
             night_target_name = self.players[self.pending_wolf_target]["name"]
 
@@ -168,7 +182,7 @@ class WerewolfServer:
         witch_heal_available   = (current_role == "Sorcière" and not self.witch_heal_used)
         witch_poison_available = (current_role == "Sorcière" and not self.witch_poison_used)
 
-        # Chat : la nuit seuls les loups peuvent écrire
+        # Chat : la nuit seuls les loups (et infectés) peuvent écrire
         can_chat = True
         if self.phase == "night" and self.game_started and player["alive"]:
             can_chat = is_wolf
@@ -198,6 +212,7 @@ class WerewolfServer:
             "night_target_name":     night_target_name,
             "can_act":               can_act,
             "action_hint":           action_hint,
+            "father_can_infect":     father_can_infect,
             "seer_result":           self.pending_night.get(("seer_result", player_id)),
             "wolf_count":            len(wolves_alive),
             "connected_count":       self.connected_player_count(),
@@ -321,25 +336,37 @@ class WerewolfServer:
         self.phase = "night"
         self.day_count += 1
         self.last_deaths = []
-        self.pending_night = {"seer_done": False, "witch_done": False}
+        self.pending_night = {
+            "seer_done": False,
+            "witch_done": False,
+            "father_done": False,
+        }
         self.wolf_votes = {}
         self.day_votes  = {}
         self.pending_wolf_target = None
-        self.night_step = "wolves"
+        self.night_step = "seer"   # ordre officiel Thiercelieux : Voyante → Loups → Père → Sorcière
         self._advance_if_no_role()
         self.message = f"Nuit {self.day_count} : les rôles de nuit agissent dans l'ordre."
         self.broadcast_snapshots()
 
     def _advance_if_no_role(self):
-        """Saute les étapes dont le rôle n'est pas présent parmi les joueurs vivants connectés."""
+        """Saute les étapes dont le rôle n'est pas présent.
+        Ordre officiel Thiercelieux : Voyante → Loups → Père des Loups → Sorcière."""
         connected = [p for p in self.players if p.get("connected")]
         while self.night_step != "done":
-            if self.night_step == "wolves":
-                if any(p["alive"] and is_wolf_role(p["role"]) for p in connected):
-                    break
-                self.night_step = "seer"
-            elif self.night_step == "seer":
+            if self.night_step == "seer":
                 if any(p["alive"] and p["role"] == "Voyante" for p in connected):
+                    break
+                self.night_step = "wolves"
+            elif self.night_step == "wolves":
+                if any(p["alive"] and is_wolf_player(p) for p in connected):
+                    break
+                self.night_step = "father"
+            elif self.night_step == "father":
+                # Père des Loups agit uniquement s'il est vivant et n'a pas encore infecté
+                if (not self.father_infect_used
+                        and any(p["alive"] and p["role"] == "Infect Père des Loups"
+                                for p in connected)):
                     break
                 self.night_step = "witch"
             elif self.night_step == "witch":
@@ -352,9 +379,10 @@ class WerewolfServer:
         Agrège les votes des loups dès qu'ils ont tous voté.
         Retourne True si la cible est déterminée (ou s'il n'y a pas de loup vivant).
         En cas d'égalité, le joueur avec le plus petit id l'emporte (déterministe).
+        Les joueurs infectés participent au vote des loups.
         """
         wolves = [p for p in self.players
-                  if p.get("connected") and p["alive"] and is_wolf_role(p["role"])]
+                  if p.get("connected") and p["alive"] and is_wolf_player(p)]
         if wolves and len(self.wolf_votes) == len(wolves):
             counts = Counter(self.wolf_votes.values())
             self.pending_wolf_target = max(counts.items(), key=lambda x: (x[1], -x[0]))[0]
@@ -369,8 +397,10 @@ class WerewolfServer:
     def _resolve_night(self):
         """Applique les morts de la nuit et passe en phase de jour."""
         deaths: set = set()
+        infected_this_night = self.pending_night.get("infected_target")
         if (self.pending_wolf_target is not None
-                and not self.pending_night.get("saved", False)):
+                and not self.pending_night.get("saved", False)
+                and self.pending_wolf_target != infected_this_night):
             deaths.add(self.pending_wolf_target)
         pt = self.pending_night.get("poison_target")
         if pt is not None:
@@ -404,24 +434,65 @@ class WerewolfServer:
         target = msg.get("target")
 
         if action == "wolf_kill":
-            if not is_wolf_role(player["role"]):
+            if not is_wolf_player(player):
                 return {"type": "error", "message": "Action réservée aux loups-garous."}
             if self.night_step != "wolves":
                 return {"type": "error", "message": "Ce n'est pas encore le tour des loups."}
             if target == player_id or target not in self.alive_ids():
                 return {"type": "error", "message": "Cible invalide."}
+            if is_wolf_player(self.players[target]):
+                return {"type": "error", "message": "Vous ne pouvez pas viser un loup."}
             self.wolf_votes[player_id] = target
             wolves = [p for p in self.players
-                      if p.get("connected") and p["alive"] and is_wolf_role(p["role"])]
+                      if p.get("connected") and p["alive"] and is_wolf_player(p)]
             if len(self.wolf_votes) == len(wolves):
                 counts = Counter(self.wolf_votes.values())
                 self.pending_wolf_target = max(counts.items(), key=lambda x: (x[1], -x[0]))[0]
-                self.night_step = "seer"
+                self.night_step = "father"
                 self._advance_if_no_role()
                 if self.night_step == "done":
                     self._resolve_night()
                 else:
                     self.broadcast_snapshots()
+            return self.player_snapshot(player_id)
+
+        if action == "father_infect":
+            if player["role"] != "Infect Père des Loups" or self.pending_night.get("father_done", False):
+                return {"type": "error", "message": "Action du Père des Loups indisponible."}
+            if self.night_step != "father":
+                return {"type": "error", "message": "Ce n'est pas encore le tour du Père des Loups."}
+            if self.father_infect_used:
+                return {"type": "error", "message": "Pouvoir d'infection déjà utilisé."}
+            if self.pending_wolf_target is None:
+                return {"type": "error", "message": "Aucune victime à infecter."}
+            tgt = self.pending_wolf_target
+            self.players[tgt]["infected"] = True
+            self.pending_night["infected_target"] = tgt
+            self.pending_night["father_done"] = True
+            self.father_infect_used = True
+            self.append_chat("Systeme",
+                             f"Le Père des Loups agit dans l'ombre...",
+                             system=True, wolf_only=True)
+            self.night_step = "seer"
+            self._advance_if_no_role()
+            if self.night_step == "done":
+                self._resolve_night()
+            else:
+                self.broadcast_snapshots()
+            return self.player_snapshot(player_id)
+
+        if action == "father_skip":
+            if player["role"] != "Infect Père des Loups" or self.pending_night.get("father_done", False):
+                return {"type": "error", "message": "Action du Père des Loups indisponible."}
+            if self.night_step != "father":
+                return {"type": "error", "message": "Ce n'est pas encore le tour du Père des Loups."}
+            self.pending_night["father_done"] = True
+            self.night_step = "seer"
+            self._advance_if_no_role()
+            if self.night_step == "done":
+                self._resolve_night()
+            else:
+                self.broadcast_snapshots()
             return self.player_snapshot(player_id)
 
         if action == "seer_peek":
@@ -434,7 +505,7 @@ class WerewolfServer:
             result = f"{self.players[target]['name']} est {self.players[target]['role']}."
             self.pending_night[("seer_result", player_id)] = result
             self.pending_night["seer_done"] = True
-            self.night_step = "witch"
+            self.night_step = "wolves"
             self._advance_if_no_role()
             if self.night_step == "done":
                 self._resolve_night()
@@ -522,9 +593,9 @@ class WerewolfServer:
         if player is None:
             return self.player_snapshot(player_id)
 
-        # La nuit : seuls les loups peuvent écrire
+        # La nuit : seuls les loups (et infectés) peuvent écrire
         if self.phase == "night" and self.game_started:
-            if not is_wolf_role(player.get("role", "")):
+            if not is_wolf_player(player):
                 return {"type": "error",
                         "message": "Seuls les loups-garous peuvent parler la nuit."}
 
@@ -534,7 +605,7 @@ class WerewolfServer:
             clean = "*" * len(raw)
 
         wolf_only = (self.phase == "night" and self.game_started
-                     and is_wolf_role(player.get("role", "")))
+                     and is_wolf_player(player))
 
         self.append_chat(author, clean, wolf_only=wolf_only)
         if flagged:

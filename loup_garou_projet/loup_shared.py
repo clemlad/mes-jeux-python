@@ -31,9 +31,9 @@ ROLE_CATALOG = {
         "camp": "Loups",
         "aura": "Sombre",
         "max": 1,
-        "night_action": False,
+        "night_action": True,
         "weight": 2.5,
-        "description": "Rôle de loup spécial. Dans cette version, il compte comme un loup supplémentaire dans le camp des loups.",
+        "description": "Loup spécial. Après le vote des loups, il peut infecter la victime désignée UNE seule fois par partie. La victime devient loup tout en conservant ses capacités d'origine.",
         "ui_icon": "IP",
     },
     "Voyante": {
@@ -152,7 +152,8 @@ AVAILABLE_ROLES = [role for role in ROLE_CATALOG.keys() if role != "Villageois"]
 ROLES_ORDER = list(AVAILABLE_ROLES) + ["Villageois"]
 
 # Séparation UI : rôles affichés dans la section "classiques" vs "spéciaux"
-CLASSIC_ROLE_NAMES = ["Loup-garou", "Voyante", "Sorcière"]
+# "Villageois" apparaît dans les classiques mais est géré comme remplissage
+CLASSIC_ROLE_NAMES = ["Loup-garou", "Voyante", "Sorcière", "Villageois"]
 SPECIAL_ROLE_NAMES = [
     "Infect Père des Loups",
     "Cupidon",
@@ -182,6 +183,11 @@ def role_details(role_name):
 def is_wolf_role(role_name):
     """Retourne True si le rôle appartient au camp des loups."""
     return role_name in {"Loup-garou", "Infect Père des Loups"}
+
+
+def is_wolf_player(player):
+    """Retourne True si le joueur appartient au camp des loups (rôle loup ou infecté)."""
+    return is_wolf_role(player.get("role", "")) or player.get("infected", False)
 
 
 def normalize_role_config(role_config=None):
@@ -214,8 +220,8 @@ def configured_special_roles(role_config=None):
 
 
 def min_players_for_config(role_config=None):
-    """Nombre minimum de joueurs requis : rôles spéciaux + au moins 1 villageois."""
-    return max(MIN_PLAYERS, len(configured_special_roles(role_config)) + 1)
+    """Nombre minimum de joueurs requis : au moins autant de joueurs que de rôles configurés."""
+    return max(MIN_PLAYERS, len(configured_special_roles(role_config)))
 
 
 def role_config_error(player_count, role_config=None):
@@ -285,7 +291,7 @@ def build_roles(player_count, role_config=None):
     if player_count < MIN_PLAYERS:
         raise ValueError(f"Il faut au moins {MIN_PLAYERS} joueurs.")
     roles = configured_special_roles(role_config)
-    if len(roles) >= player_count:
+    if len(roles) > player_count:
         raise ValueError("Trop de rôles spéciaux pour ce nombre de joueurs.")
     while len(roles) < player_count:
         roles.append("Villageois")
@@ -318,9 +324,10 @@ def check_winner(players):
     Vérifie si une équipe a gagné.
     Les loups gagnent dès qu'ils sont au moins aussi nombreux que les non-loups.
     Retourne "Village", "Loups", ou None si la partie continue.
+    Les joueurs infectés comptent dans le camp des loups.
     """
-    alive_wolves     = sum(1 for p in players if p["alive"] and is_wolf_role(p["role"]))
-    alive_non_wolves = sum(1 for p in players if p["alive"] and not is_wolf_role(p["role"]))
+    alive_wolves     = sum(1 for p in players if p["alive"] and is_wolf_player(p))
+    alive_non_wolves = sum(1 for p in players if p["alive"] and not is_wolf_player(p))
     if alive_wolves == 0:
         return "Village"
     if alive_wolves >= alive_non_wolves:
@@ -331,22 +338,24 @@ def check_winner(players):
 def serialize_players_for(player_id, players, reveal_all=False):
     """
     Sérialise la liste des joueurs du point de vue de player_id.
-    Un joueur voit son propre rôle et celui des loups s'il est loup.
+    Un joueur voit son propre rôle et celui des loups s'il est loup (ou infecté).
     En fin de partie (reveal_all=True), tous les rôles sont visibles.
     """
     data = []
-    current_role = players[player_id]["role"] if 0 <= player_id < len(players) else None
+    current_player = players[player_id] if 0 <= player_id < len(players) else None
+    current_is_wolf_side = is_wolf_player(current_player) if current_player else False
     for p in players:
         entry = {
             "id":            p["id"],
             "name":          p["name"],
             "alive":         p["alive"],
             "revealed_role": p.get("revealed_role"),
+            "infected":      False,
         }
-        if reveal_all or p["id"] == player_id:
-            entry["role"] = p["role"]
-        elif is_wolf_role(p["role"]) and is_wolf_role(current_role):
-            # Les loups se connaissent entre eux
-            entry["role"] = p["role"]
+        can_see = (reveal_all or p["id"] == player_id
+                   or (is_wolf_player(p) and current_is_wolf_side))
+        if can_see:
+            entry["role"]     = p["role"]
+            entry["infected"] = p.get("infected", False)
         data.append(entry)
     return data
