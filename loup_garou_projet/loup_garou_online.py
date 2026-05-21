@@ -54,6 +54,20 @@ NIGHT_BG_BOT = (30, 16,  50)
 DAY_BG_TOP   = (30, 55,  80)
 DAY_BG_BOT   = (70, 100, 60)
 
+# Labels compacts pour les 10 étapes de nuit (2 rangées de 5)
+NIGHT_STEP_INFO = [
+    ("cupidon",    "CUP",  CYAN_COOL),
+    ("wild_child", "ENF",  GOLD_WARM),
+    ("seer",       "VOY",  CYAN_COOL),
+    ("wolves",     "LOU",  WOLF_RED),
+    ("father",     "PÈR",  (160, 90, 20)),
+    ("witch",      "SOR",  (160, 60, 180)),
+    ("salvateur",  "SAL",  (60, 160, 80)),
+    ("fox",        "REN",  (180, 140, 40)),
+    ("siren",      "SIR",  (60, 120, 200)),
+    ("arsonist",   "PYR",  (220, 80, 20)),
+]
+
 
 # ── Réseau ────────────────────────────────────────────────────────────────────
 
@@ -70,8 +84,7 @@ class NetworkClient:
         self.send({"type": "join", "name": player_name})
 
     def _listen(self):
-        """Lit les messages entrants. Protocole : JSON terminé par '\n', un message par ligne.
-        Le buffer accumule les données partielles jusqu'à trouver un '\n' complet."""
+        """Lit les messages entrants. Protocole : JSON terminé par '\n', un message par ligne."""
         buf = ""
         try:
             while self.running:
@@ -121,7 +134,7 @@ class WerewolfOnlineGame:
         self.network = NetworkClient(host, player_name)
         self.running = True
 
-        # État
+        # État de base
         self.state       = "connecting"
         self.server_name = "Salon"
         self.message     = "Connexion au serveur..."
@@ -154,18 +167,42 @@ class WerewolfOnlineGame:
         self.selected_role_name = CLASSIC_ROLE_NAMES[0]
         self.show_role_info     = False
 
-        # Boutons
-        self.btn_start       = Button("LANCER LA PARTIE",    BTN_SUCCESS, BTN_SUCCESS_H)
-        self.btn_vote        = Button("VALIDER L'ACTION",    BTN_PRIMARY, BTN_PRIMARY_H)
-        self.btn_sync        = Button("SYNC",                BTN_NEUTRAL, BTN_NEUTRAL_H)
-        self.btn_skip        = Button("PASSER",              BTN_NEUTRAL, BTN_NEUTRAL_H)
-        self.btn_save          = Button("SAUVER LA VICTIME",   BTN_SUCCESS,    BTN_SUCCESS_H)
-        self.btn_poison        = Button("EMPOISONNER",         (90, 24, 80),  (120, 38, 108))
-        self.btn_father_infect = Button("INFECTER",            (140, 60, 10), (180, 90, 20))
-        self.btn_father_skip   = Button("PASSER",              BTN_NEUTRAL,   BTN_NEUTRAL_H)
-        self.btn_send_chat   = Button("ENVOYER",             BTN_PRIMARY, BTN_PRIMARY_H)
-        self.btn_end         = Button("RETOUR AU MENU",      BTN_NEUTRAL, BTN_NEUTRAL_H)
-        self.chat_input      = InputBox(placeholder="Écris un message...", max_len=220)
+        # Nouveaux champs de synchronisation serveur
+        self.multi_select_list: list  = []   # sélection multiple (Cupidon x2, Renard x3)
+        self.night_targets_needed     = 1    # 1 normal, 2 cupidon, 3 renard
+        self.is_hunter_turn           = False
+        self.sniper_target_name       = None
+        self.fox_result               = None
+        self.fox_power_active         = True
+        self.lover_partner_name       = None
+        self.mentor_name              = None
+        self.charmed_list: list       = []
+        self.fueled_list: list        = []
+        self.salvateur_last_name      = None
+
+        # Boutons de base
+        self.btn_start         = Button("LANCER LA PARTIE",  BTN_SUCCESS, BTN_SUCCESS_H)
+        self.btn_vote          = Button("VALIDER L'ACTION",  BTN_PRIMARY, BTN_PRIMARY_H)
+        self.btn_sync          = Button("SYNC",              BTN_NEUTRAL, BTN_NEUTRAL_H)
+        self.btn_skip          = Button("PASSER",            BTN_NEUTRAL, BTN_NEUTRAL_H)
+        self.btn_save          = Button("SAUVER",            BTN_SUCCESS,    BTN_SUCCESS_H)
+        self.btn_poison        = Button("EMPOISONNER",       (90, 24, 80),   (120, 38, 108))
+        self.btn_father_infect = Button("INFECTER",          (140, 60, 10),  (180, 90, 20))
+        self.btn_father_skip   = Button("PASSER",            BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.btn_send_chat     = Button("ENVOYER",           BTN_PRIMARY,    BTN_PRIMARY_H)
+        self.btn_end           = Button("RETOUR AU MENU",    BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.chat_input        = InputBox(placeholder="Écris un message...", max_len=220)
+
+        # Nouveaux boutons pour les rôles additionnels
+        self.btn_salvateur_skip  = Button("PASSER",          BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.btn_siren_skip      = Button("PASSER",          BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.btn_arsonist_ignite = Button("ENFLAMMER",       (200, 60, 10),  (240, 90, 30))
+        self.btn_arsonist_skip   = Button("PASSER",          BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.btn_hunter_shoot    = Button("TIRER",           (180, 20, 20),  (220, 40, 40))
+        self.btn_cupidon_confirm = Button("CONFIRMER",       BTN_SUCCESS,    BTN_SUCCESS_H)
+        self.btn_fox_confirm     = Button("SENTIR",          (40, 180, 180), (60, 220, 220))
+        self.btn_fox_skip        = Button("PASSER",          BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.btn_wild_confirm    = Button("CHOISIR MENTOR",  BTN_SUCCESS,    BTN_SUCCESS_H)
 
         self.player_rects: list    = []
         self.role_row_rects: dict  = {}
@@ -198,30 +235,52 @@ class WerewolfOnlineGame:
                                        h - 150)
         self.bottom_rect = pygame.Rect(pad, h - 50, w - pad * 2, 36)
 
-        bx = self.center_rect.x + 20
-        by = self.center_rect.bottom - 56
+        bx     = self.center_rect.x + 20
+        by     = self.center_rect.bottom - 56
         full_w = self.center_rect.width - 40
-        bw = min(250, full_w)
+        bw     = min(250, full_w)
         skip_x = bx + bw + 10
         skip_w = max(80, self.center_rect.right - 20 - skip_x)
 
         self.btn_start.set_rect((bx, by, full_w, 44))
         self.btn_vote.set_rect ((bx, by, bw, 44))
-        self.btn_skip.set_rect ((skip_x, by, skip_w, 44))
-        self.btn_save.set_rect ((skip_x, by, skip_w, 44))
 
-        # Boutons sorcière (3 colonnes égales)
+        # Sorcière : 3 colonnes égales
         wb = max(70, full_w // 3 - 6)
         self.btn_save.set_rect  ((bx,             by, wb, 44))
         self.btn_poison.set_rect((bx + wb + 8,    by, wb, 44))
         self.btn_skip.set_rect  ((bx + wb*2 + 16, by, max(60, full_w - wb*2 - 16), 44))
 
-        # Boutons Père des Loups (2 colonnes)
+        # Père des Loups : 2 colonnes
         fw = max(90, full_w // 2 - 6)
         self.btn_father_infect.set_rect((bx,          by, fw, 44))
         self.btn_father_skip.set_rect  ((bx + fw + 8, by, max(60, full_w - fw - 8), 44))
 
-        # Bouton fin de partie
+        # Salvateur : vote=protéger + skip
+        self.btn_salvateur_skip.set_rect((skip_x, by, skip_w, 44))
+
+        # Sirène : vote=envoûter + skip
+        self.btn_siren_skip.set_rect((skip_x, by, skip_w, 44))
+
+        # Pyromane : 3 colonnes (vote=asperger, ignite, skip)
+        arb = max(70, full_w // 3 - 6)
+        self.btn_arsonist_ignite.set_rect((bx + arb + 8,    by, arb, 44))
+        self.btn_arsonist_skip.set_rect  ((bx + arb*2 + 16, by, max(60, full_w - arb*2 - 16), 44))
+
+        # Chasseur : bouton pleine largeur
+        self.btn_hunter_shoot.set_rect((bx, by, full_w, 44))
+
+        # Cupidon : bouton confirmer pleine largeur
+        self.btn_cupidon_confirm.set_rect((bx, by, full_w, 44))
+
+        # Renard : sentir (bw) + passer (skip_w)
+        self.btn_fox_confirm.set_rect((bx,     by, bw,     44))
+        self.btn_fox_skip.set_rect   ((skip_x, by, skip_w, 44))
+
+        # Enfant sauvage : confirmer pleine largeur
+        self.btn_wild_confirm.set_rect((bx, by, full_w, 44))
+
+        # Fin de partie
         ew = min(300, full_w)
         self.btn_end.set_rect((self.center_rect.centerx - ew // 2, by, ew, 44))
 
@@ -283,14 +342,27 @@ class WerewolfOnlineGame:
                 self.witch_heal_available   = msg.get("witch_heal_available", self.witch_heal_available)
                 self.witch_poison_available = msg.get("witch_poison_available", self.witch_poison_available)
                 self.father_can_infect = msg.get("father_can_infect", False)
-                self.night_step  = msg.get("night_step", "wolves")
-                self.role_config = normalize_role_config(
+                self.night_step        = msg.get("night_step", "wolves")
+                self.role_config       = normalize_role_config(
                     msg.get("role_config", self.role_config))
+
+                # Nouveaux champs
+                self.night_targets_needed  = msg.get("night_targets_needed", 1)
+                self.is_hunter_turn        = msg.get("is_hunter_turn", False)
+                self.sniper_target_name    = msg.get("sniper_target_name")
+                self.fox_result            = msg.get("fox_result")
+                self.fox_power_active      = msg.get("fox_power_active", True)
+                self.lover_partner_name    = msg.get("lover_partner_name")
+                self.mentor_name           = msg.get("mentor_name")
+                self.charmed_list          = msg.get("charmed_list", [])
+                self.fueled_list           = msg.get("fueled_list", [])
+                self.salvateur_last_name   = msg.get("salvateur_last_name")
 
                 # Réinitialise la sélection à chaque changement de phase
                 if new_phase != self.prev_phase:
-                    self.selected_target = None
-                    self.prev_phase = new_phase
+                    self.selected_target   = None
+                    self.multi_select_list = []
+                    self.prev_phase        = new_phase
                 self.phase = new_phase
 
                 if (self.selected_role_name is None
@@ -309,6 +381,10 @@ class WerewolfOnlineGame:
                         and all(p["id"] != self.selected_target or not p["alive"]
                                 for p in self.players)):
                     self.selected_target = None
+                self.multi_select_list = [
+                    pid for pid in self.multi_select_list
+                    if any(p["id"] == pid and p["alive"] for p in self.players)
+                ]
             elif mt == "error":
                 self.message = "⚠ " + msg.get("message", "")
             elif mt == "info":
@@ -317,7 +393,6 @@ class WerewolfOnlineGame:
     def _send_role_config_update(self, role_name: str, delta: int):
         if not self.is_host() or self.phase != "lobby":
             return
-        # Villageois contrôle max_players (nombre de villageois = max - autres rôles)
         if role_name == "Villageois":
             self._send_max_players_update(delta)
             return
@@ -349,24 +424,47 @@ class WerewolfOnlineGame:
         if tgt != self.max_players:
             self.network.send({"type": "update_max_players", "max_players": tgt})
 
+    # ── Méthodes d'envoi des actions ─────────────────────────────────────────
+
     def send_action(self):
+        """Action principale selon la phase (lancer, voter, action de nuit de base)."""
         role = self.current_role()
         if self.phase == "lobby":
             self.network.send({"type": "start_game"})
             return
-        if self.phase == "day" and self.selected_target is not None:
+        if self.phase == "day" and self.selected_target is not None and not self.has_voted:
             self.network.send({"type": "vote_action", "target": self.selected_target})
             self.selected_target = None
             return
-        if self.phase == "night" and self.selected_target is not None:
-            if is_wolf_role(role):
+        if self.phase == "night" and self.can_act and self.selected_target is not None:
+            step = self.night_step
+            if step == "wolves" and is_wolf_role(role):
                 self.network.send({"type": "night_action", "action": "wolf_kill",
                                    "target": self.selected_target})
                 self.selected_target = None
-            elif role == "Voyante":
+            elif step == "seer" and role == "Voyante":
                 self.network.send({"type": "night_action", "action": "seer_peek",
                                    "target": self.selected_target})
                 self.selected_target = None
+            elif step == "salvateur" and role == "Salvateur":
+                self.network.send({"type": "night_action", "action": "salvateur_protect",
+                                   "target": self.selected_target})
+                self.selected_target = None
+            elif step == "siren" and role == "Sirène":
+                self.network.send({"type": "night_action", "action": "siren_charm",
+                                   "target": self.selected_target})
+                self.selected_target = None
+            elif step == "arsonist" and role == "Pyromane":
+                self.network.send({"type": "night_action", "action": "arsonist_fuel",
+                                   "target": self.selected_target})
+                self.selected_target = None
+            elif step == "wild_child" and role == "Enfant sauvage":
+                self.network.send({"type": "night_action", "action": "wild_child_choose",
+                                   "target": self.selected_target})
+                self.selected_target = None
+
+    def send_witch_save(self):
+        self.network.send({"type": "night_action", "action": "witch_save"})
 
     def send_witch_poison(self):
         if self.selected_target is not None:
@@ -383,8 +481,38 @@ class WerewolfOnlineGame:
     def send_father_skip(self):
         self.network.send({"type": "night_action", "action": "father_skip"})
 
-    def send_witch_save(self):
-        self.network.send({"type": "night_action", "action": "witch_save"})
+    def send_salvateur_skip(self):
+        self.network.send({"type": "night_action", "action": "salvateur_skip"})
+
+    def send_siren_skip(self):
+        self.network.send({"type": "night_action", "action": "siren_skip"})
+
+    def send_arsonist_ignite(self):
+        self.network.send({"type": "night_action", "action": "arsonist_ignite"})
+
+    def send_arsonist_skip(self):
+        self.network.send({"type": "night_action", "action": "arsonist_skip"})
+
+    def send_fox_sense(self):
+        if len(self.multi_select_list) == 3:
+            self.network.send({"type": "night_action", "action": "fox_sense",
+                               "targets": list(self.multi_select_list)})
+            self.multi_select_list = []
+
+    def send_fox_skip(self):
+        self.network.send({"type": "night_action", "action": "fox_skip"})
+
+    def send_cupidon_confirm(self):
+        if len(self.multi_select_list) == 2:
+            self.network.send({"type": "night_action", "action": "cupidon_choose",
+                               "targets": list(self.multi_select_list)})
+            self.multi_select_list = []
+
+    def send_hunter_shoot(self):
+        if self.selected_target is not None:
+            self.network.send({"type": "night_action", "action": "hunter_shoot",
+                               "target": self.selected_target})
+            self.selected_target = None
 
     def send_chat(self):
         txt = self.chat_input.consume()
@@ -441,24 +569,26 @@ class WerewolfOnlineGame:
             rect  = pygame.Rect(self.left_rect.x + 8, y, self.left_rect.width - 16, row_h)
 
             if y + row_h > self.left_rect.bottom - 6:
-                break  # plus de place
+                break
 
-            sel   = (p["id"] == self.selected_target)
+            # Sélectionné si dans multi_select_list ou selected_target
+            in_multi = p["id"] in self.multi_select_list
+            sel   = (p["id"] == self.selected_target) or in_multi
             is_me = (p["id"] == self.your_id)
             dead  = not p["alive"]
 
             bg = (14, 10, 28) if dead else ((56, 34, 84) if sel else (26, 18, 48))
             pygame.draw.rect(self.screen, bg, rect, border_radius=12)
-            pygame.draw.rect(self.screen, MIST_LIGHT if sel else (44, 36, 70),
-                             rect, 2, border_radius=12)
+            bord_col = GOLD_WARM if in_multi else (MIST_LIGHT if sel else (44, 36, 70))
+            pygame.draw.rect(self.screen, bord_col, rect, 2, border_radius=12)
 
-            # Révélation : on voit son propre rôle, les coéquipiers loups/infectés, et les morts
             my_player = next((pl for pl in self.players if pl["id"] == self.your_id), {})
             i_am_wolf_side = is_wolf_player(my_player)
             p_is_wolf_side = is_wolf_player(p)
             reveal = dead or is_me or (p_is_wolf_side and i_am_wolf_side)
             role_str = (p.get("revealed_role") or p.get("role") or "?") if reveal else "?"
-            infected_str = " (Infecté)" if (reveal and p.get("infected") and not is_wolf_role(p.get("role", ""))) else ""
+            infected_str = (" (Infect)" if (reveal and p.get("infected")
+                            and not is_wolf_role(p.get("role", ""))) else "")
 
             bc = ROLE_WOLF_CLR if (is_wolf_role(role_str) or p.get("infected")) else MIST_PURPLE
             badge = pygame.Rect(rect.x + 7, rect.y + 9, 36, 28)
@@ -475,10 +605,22 @@ class WerewolfOnlineGame:
             draw_text(self.screen, role_display,
                       f["xs"], WOLF_RED if dead else CYAN_COOL,
                       topleft=(rect.x + 50, rect.y + 24))
+
+            # Icônes d'état (amoureux, envoûté, aspergé)
+            icons = []
+            if p.get("is_lover"):
+                icons.append(("♥", WOLF_RED))
+            if p.get("is_charmed"):
+                icons.append(("♪", CYAN_COOL))
+            if p.get("is_fueled"):
+                icons.append(("🔥", (220, 100, 20)))
+            ix = rect.right - 8
+            for icon, ic in reversed(icons):
+                draw_text(self.screen, icon, f["xs"], ic, topright=(ix, rect.y + 6))
+                ix -= 16
+
             if is_me:
                 pygame.draw.circle(self.screen, GOLD_WARM, (rect.right - 10, rect.centery), 5)
-            if sel:
-                pygame.draw.circle(self.screen, GOLD_WARM, (rect.right - 10, rect.centery), 6)
 
             self.player_rects.append((p["id"], rect))
             y += row_h + 4
@@ -534,7 +676,6 @@ class WerewolfOnlineGame:
                   f["xs"], CYAN_COOL, topleft=(rect.x, rect.y + 54))
 
     def _villager_count(self) -> int:
-        """Nombre de Villageois calculé = max_players - somme des autres rôles configurés."""
         special_count = sum(v for k, v in self.role_config.items() if k in AVAILABLE_ROLES)
         return max(0, self.max_players - special_count)
 
@@ -543,7 +684,6 @@ class WerewolfOnlineGame:
         self.role_minus_rects = {}
         self.role_plus_rects  = {}
 
-        # CLASSIC_ROLE_NAMES inclut "Villageois" — affiché en dernier des classiques
         sections = [("Roles classiques", CLASSIC_ROLE_NAMES),
                     ("Roles speciaux",   SPECIAL_ROLE_NAMES)]
         ROW_H   = 46
@@ -563,7 +703,6 @@ class WerewolfOnlineGame:
         max_scr = max(0, total_h - vis_h)
         self.role_scroll = max(0, min(self.role_scroll, max_scr))
         cy      = self.role_list_rect.y + 4 - self.role_scroll
-        # Clip pour masquer les lignes qui dépassent la zone scrollable
         old_clip = self.screen.get_clip()
         self.screen.set_clip(self.role_list_rect)
         mouse = pygame.mouse.get_pos()
@@ -607,12 +746,10 @@ class WerewolfOnlineGame:
             draw_text(self.screen, det["camp"], f["xs"], CYAN_COOL,
                       topleft=(row.x + 52, row.y + 22))
 
-            # Compteur ± boutons (tout à droite)
             cnt_r = pygame.Rect(row.right - 128, row.y + 7, 38, 28)
             min_r = pygame.Rect(row.right - 84,  row.y + 7, 30, 28)
             pls_r = pygame.Rect(row.right - 46,  row.y + 7, 30, 28)
             is_host = self.is_host()
-            # Villageois : - désactivé à 0, + désactivé au max joueurs
             if rn == "Villageois":
                 minus_en = is_host and self._villager_count() > 0
                 plus_en  = is_host and self.max_players < MAX_PLAYERS
@@ -639,7 +776,6 @@ class WerewolfOnlineGame:
 
         self.screen.set_clip(old_clip)
 
-        # Scrollbar
         if total_h > vis_h and max_scr > 0:
             bx  = self.role_list_rect.right - 7
             by2 = self.role_list_rect.y + 4
@@ -716,7 +852,6 @@ class WerewolfOnlineGame:
         if self.show_role_info:
             self.draw_role_info_popup(f)
 
-        # Footer bouton lancer
         footer = pygame.Rect(self.center_rect.x + 6, self.center_rect.bottom - 62,
                              self.center_rect.width - 12, 54)
         pygame.draw.rect(self.screen, (22, 16, 42), footer, border_radius=16)
@@ -740,7 +875,6 @@ class WerewolfOnlineGame:
         mouse = pygame.mouse.get_pos()
         is_day = (self.phase == "day")
 
-        # Panneau teinté selon phase
         panel_s = pygame.Surface((self.center_rect.width, self.center_rect.height),
                                   pygame.SRCALPHA)
         col = (28, 48, 32, 205) if is_day else (22, 14, 38, 210)
@@ -753,7 +887,6 @@ class WerewolfOnlineGame:
                          width=2, border_radius=22)
         self.screen.blit(panel_s, self.center_rect.topleft)
 
-        # ----- Ecran de fin de partie
         if self.phase == "end" and self.winner:
             self._draw_end_screen(f, mouse)
             return
@@ -773,20 +906,27 @@ class WerewolfOnlineGame:
         pygame.draw.rect(self.screen, camp_col, rb, border_radius=14)
         draw_text(self.screen, role, f["xs"], WHITE_SOFT, center=rb.center)
 
-        # Badge cible selectionnee
+        # Badge cible sélectionnée
+        tgt_disp = None
         if self.selected_target is not None:
-            tgt_name = next((p["name"] for p in self.players
+            tgt_disp = next((p["name"] for p in self.players
                              if p["id"] == self.selected_target), "?")
-            sr = pygame.Rect(rb.right + 10, rb.y, 160, 28)
+        elif self.multi_select_list:
+            names = [p["name"] for p in self.players
+                     if p["id"] in self.multi_select_list]
+            tgt_disp = ", ".join(names)
+        if tgt_disp:
+            sr = pygame.Rect(rb.right + 10, rb.y, 180, 28)
             pygame.draw.rect(self.screen, (80, 48, 14), sr, border_radius=14)
             pygame.draw.rect(self.screen, GOLD_WARM, sr, 1, border_radius=14)
-            draw_text(self.screen, f"Cible : {tgt_name}", f["xs"], GOLD_WARM, center=sr.center)
+            label = f"Cible : {tgt_disp}"[:22]
+            draw_text(self.screen, label, f["xs"], GOLD_WARM, center=sr.center)
 
-        # Indicateur d'ordre des tours (nuit uniquement)
+        # Indicateur d'ordre des tours (nuit)
         if self.phase == "night":
             self._draw_night_steps(f, sy=self.center_rect.y + 90)
 
-        y = self.center_rect.y + (122 if self.phase == "night" else 100)
+        y = self.center_rect.y + (148 if self.phase == "night" else 100)
 
         def line(txt, col):
             nonlocal y
@@ -803,19 +943,49 @@ class WerewolfOnlineGame:
         line(self.message, WHITE_SOFT)
         line(self.action_hint, GOLD_PALE)
 
+        # Infos de vote
         if self.phase == "day" and self.votes_needed > 0:
             line(f"Votes : {self.votes_cast}/{self.votes_needed}",
                  GOLD_WARM if self.has_voted else GREY_DIM)
             if self.has_voted:
                 line("Vote enregistre - en attente des autres joueurs.", CYAN_COOL)
-            else:
-                line("Selectionnez un joueur puis cliquez VALIDER LE VOTE.", GOLD_PALE)
+            elif self.can_act:
+                line("Selectionnez un joueur puis cliquez VALIDER.", GOLD_PALE)
 
+        # Infos de nuit
         if self.phase == "night":
             if self.night_target_name:
                 line(f"Victime des loups : {self.night_target_name}", WOLF_RED)
             if self.seer_result:
                 line(self.seer_result, CYAN_COOL)
+            if self.fox_result:
+                line(f"Renard : {self.fox_result}", (180, 200, 60))
+            if not self.fox_power_active and role == "Renard":
+                line("Votre pouvoir est perdu.", GREY_DIM)
+
+        # Infos de rôle persistantes
+        if self.sniper_target_name:
+            alive_flag = next((p["alive"] for p in self.players
+                               if p.get("name") == self.sniper_target_name), False)
+            status = "vivant" if alive_flag else "elimine"
+            line(f"Cible Sniper : {self.sniper_target_name} ({status})", GOLD_WARM)
+        if self.mentor_name:
+            alive_flag = next((p["alive"] for p in self.players
+                               if p.get("name") == self.mentor_name), False)
+            status = "vivant" if alive_flag else "elimine - vous etes loup !"
+            line(f"Mentor : {self.mentor_name} ({status})",
+                 WOLF_RED if not alive_flag else CYAN_COOL)
+        if self.lover_partner_name:
+            alive_flag = next((p["alive"] for p in self.players
+                               if p.get("name") == self.lover_partner_name), False)
+            line(f"Amoureux(se) : {self.lover_partner_name} ({'vivant' if alive_flag else 'elimine !'})",
+                 WOLF_RED if not alive_flag else (220, 80, 120))
+        if self.charmed_list and role == "Sirène":
+            line(f"Envoutes : {', '.join(self.charmed_list)}", (60, 140, 220))
+        if self.fueled_list and role == "Pyromane":
+            line(f"Asperges : {', '.join(self.fueled_list)}", (220, 120, 20))
+        if self.salvateur_last_name and role == "Salvateur":
+            line(f"Interdit cette nuit : {self.salvateur_last_name}", GREY_DIM)
 
         if self.last_deaths:
             line("Elimine(s) : " + ", ".join(self.last_deaths), BLOOD_RED)
@@ -833,56 +1003,78 @@ class WerewolfOnlineGame:
                       topleft=(self.center_rect.x + 18, y))
             y += 17
 
-        # ---- Boutons d'action
-        is_witch  = role.startswith("Sorci") and self.phase == "night" and self.can_act
-        is_father = (role == "Infect Père des Loups"
-                     and self.phase == "night" and self.can_act
-                     and self.night_step == "father")
-        if is_father:
-            self._draw_father_buttons(f, mouse)
-        elif is_witch:
-            self._draw_witch_buttons(f, mouse)
-        elif self.phase in ("night", "day"):
-            lbl = "VALIDER LE VOTE" if self.phase == "day" else "VALIDER L'ACTION"
+        # ---- Boutons d'action selon rôle / étape
+        self._draw_action_buttons(f, mouse, role)
+
+    def _draw_action_buttons(self, f: dict, mouse, role: str):
+        """Sélectionne et affiche les boutons appropriés selon le contexte."""
+        # Chasseur en attente (priorité absolue, peut être day ou night)
+        if self.is_hunter_turn and self.can_act:
+            self._draw_hunter_buttons(f, mouse)
+            return
+
+        if self.phase == "night" and self.can_act:
+            step = self.night_step
+            if role == "Infect Père des Loups" and step == "father":
+                self._draw_father_buttons(f, mouse)
+            elif role == "Sorcière" and step == "witch":
+                self._draw_witch_buttons(f, mouse)
+            elif role == "Salvateur" and step == "salvateur":
+                self._draw_salvateur_buttons(f, mouse)
+            elif role == "Renard" and step == "fox":
+                self._draw_fox_buttons(f, mouse)
+            elif role == "Sirène" and step == "siren":
+                self._draw_siren_buttons(f, mouse)
+            elif role == "Pyromane" and step == "arsonist":
+                self._draw_arsonist_buttons(f, mouse)
+            elif role == "Cupidon" and step == "cupidon":
+                self._draw_cupidon_buttons(f, mouse)
+            elif role == "Enfant sauvage" and step == "wild_child":
+                self._draw_wild_child_buttons(f, mouse)
+            else:
+                # Loups, Voyante — bouton standard
+                lbl = ("VALIDER LE VOTE" if self.phase == "day" else "VALIDER L'ACTION")
+                self.btn_vote.text = lbl
+                vote_ok = self.selected_target is not None
+                self.btn_vote.draw(self.screen, f["small"], mouse, enabled=vote_ok)
+
+        elif self.phase == "day":
+            lbl = "VALIDER LE VOTE"
             self.btn_vote.text = lbl
             vote_ok = (self.can_act and self.selected_target is not None
                        and not self.has_voted)
             self.btn_vote.draw(self.screen, f["small"], mouse, enabled=vote_ok)
 
+    # ── Indicateur des étapes de nuit (2 rangées × 5) ────────────────────────
+
     def _draw_night_steps(self, f: dict, sy: int):
-        """Affiche la progression officielle Thiercelieux : Voyante → Loups → Père → Sorcière."""
-        steps = [
-            ("seer",   "VOYANTE",  CYAN_COOL),
-            ("wolves", "LOUPS",    WOLF_RED),
-            ("father", "PÈRE",     (160, 90, 20)),
-            ("witch",  "SORCIÈRE", (160, 60, 180)),
-        ]
         total_w = self.center_rect.width - 40
-        n = len(steps)
-        pill_w  = total_w // n - 8
-        pill_h  = 24
-        sx      = self.center_rect.x + 20
-        for i, (step, label, col) in enumerate(steps):
-            px      = sx + i * (pill_w + 8)
-            is_cur  = (step == self.night_step)
-            pill    = pygame.Rect(px, sy, pill_w, pill_h)
-            surf    = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
-            bg_col  = (*col, 210) if is_cur else (40, 32, 60, 130)
-            pygame.draw.rect(surf, bg_col, (0, 0, pill_w, pill_h), border_radius=11)
+        n_per_row = 5
+        pill_w = (total_w - (n_per_row - 1) * 4) // n_per_row
+        pill_h = 22
+        sx = self.center_rect.x + 20
+
+        for idx, (step, label, col) in enumerate(NIGHT_STEP_INFO):
+            row = idx // n_per_row
+            col_i = idx % n_per_row
+            px = sx + col_i * (pill_w + 4)
+            py = sy + row * (pill_h + 4)
+            is_cur = (step == self.night_step)
+            pill   = pygame.Rect(px, py, pill_w, pill_h)
+            surf   = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+            bg_col = (*col, 210) if is_cur else (40, 32, 60, 130)
+            pygame.draw.rect(surf, bg_col, (0, 0, pill_w, pill_h), border_radius=9)
             if is_cur:
-                pygame.draw.rect(surf, (*col, 255), (0, 0, pill_w, pill_h), 2, border_radius=11)
+                pygame.draw.rect(surf, (*col, 255), (0, 0, pill_w, pill_h), 2, border_radius=9)
             self.screen.blit(surf, pill.topleft)
             txt_col = WHITE_SOFT if is_cur else GREY_DIM
             draw_text(self.screen, label, f["xs"], txt_col, center=pill.center)
-            if i < n - 1:
-                ax = px + pill_w + 2
-                ay = sy + pill_h // 2
-                draw_text(self.screen, "›", f["xs"], GREY_DIM, center=(ax + 4, ay))
+
+    # ── Boutons spécifiques aux rôles ────────────────────────────────────────
 
     def _draw_father_buttons(self, f: dict, mouse):
         infect_ok = self.father_can_infect and self.night_target_name is not None
-        lbl_infect = ("INFECTER " + (self.night_target_name or "")[:10]).strip()
-        self.btn_father_infect.text = lbl_infect
+        self.btn_father_infect.text = ("INFECTER " + (self.night_target_name or "")[:10]).strip()
         self.btn_father_skip.text   = "PASSER"
         self.btn_father_infect.draw(self.screen, f["xs"], mouse, enabled=infect_ok)
         self.btn_father_skip.draw  (self.screen, f["xs"], mouse, enabled=True)
@@ -895,8 +1087,7 @@ class WerewolfOnlineGame:
     def _draw_witch_buttons(self, f: dict, mouse):
         save_ok   = (self.witch_heal_available and self.night_target_name is not None)
         poison_ok = (self.witch_poison_available and self.selected_target is not None)
-        lbl_save = ("SAUVER " + (self.night_target_name or "")[:10]).strip()
-        self.btn_save.text   = lbl_save
+        self.btn_save.text   = ("SAUVER " + (self.night_target_name or "")[:10]).strip()
         self.btn_poison.text = "EMPOISONNER"
         self.btn_skip.text   = "PASSER"
         self.btn_save.draw  (self.screen, f["xs"], mouse, enabled=save_ok)
@@ -912,18 +1103,98 @@ class WerewolfOnlineGame:
                   f["xs"], (160, 60, 180) if self.witch_poison_available else GREY_DIM,
                   topleft=(self.btn_poison.rect.x, iy))
 
+    def _draw_salvateur_buttons(self, f: dict, mouse):
+        protect_ok = (self.selected_target is not None)
+        self.btn_vote.text = "PROTEGER"
+        self.btn_vote.draw(self.screen, f["xs"], mouse, enabled=protect_ok)
+        self.btn_salvateur_skip.text = "PASSER"
+        self.btn_salvateur_skip.draw(self.screen, f["xs"], mouse, enabled=True)
+        if self.salvateur_last_name:
+            iy = self.btn_vote.rect.y - 18
+            draw_text(self.screen, f"Interdit : {self.salvateur_last_name}",
+                      f["xs"], GREY_DIM, topleft=(self.btn_vote.rect.x, iy))
+
+    def _draw_fox_buttons(self, f: dict, mouse):
+        n = len(self.multi_select_list)
+        sense_ok = (n == 3)
+        self.btn_fox_confirm.text = f"SENTIR ({n}/3)"
+        self.btn_fox_confirm.draw(self.screen, f["xs"], mouse, enabled=sense_ok)
+        self.btn_fox_skip.text = "PASSER"
+        self.btn_fox_skip.draw(self.screen, f["xs"], mouse,
+                               enabled=(not self.fox_power_active or True))
+        iy = self.btn_fox_confirm.rect.y - 18
+        draw_text(self.screen, "Cliquez sur 3 joueurs puis SENTIR",
+                  f["xs"], GOLD_PALE, topleft=(self.btn_fox_confirm.rect.x, iy))
+
+    def _draw_siren_buttons(self, f: dict, mouse):
+        charm_ok = (self.selected_target is not None)
+        self.btn_vote.text = "ENVOUTER"
+        self.btn_vote.draw(self.screen, f["xs"], mouse, enabled=charm_ok)
+        self.btn_siren_skip.text = "PASSER"
+        self.btn_siren_skip.draw(self.screen, f["xs"], mouse, enabled=True)
+        if self.charmed_list:
+            iy = self.btn_vote.rect.y - 18
+            draw_text(self.screen, f"Envoutes : {', '.join(self.charmed_list[:3])}",
+                      f["xs"], (60, 140, 220), topleft=(self.btn_vote.rect.x, iy))
+
+    def _draw_arsonist_buttons(self, f: dict, mouse):
+        fuel_ok   = (self.selected_target is not None)
+        ignite_ok = bool(self.fueled_list)
+        self.btn_vote.text = "ASPERGER"
+        self.btn_vote.draw(self.screen, f["xs"], mouse, enabled=fuel_ok)
+        self.btn_arsonist_ignite.text = f"ENFLAMMER ({len(self.fueled_list)})"
+        self.btn_arsonist_ignite.draw(self.screen, f["xs"], mouse, enabled=ignite_ok)
+        self.btn_arsonist_skip.text = "PASSER"
+        self.btn_arsonist_skip.draw(self.screen, f["xs"], mouse, enabled=True)
+        iy = self.btn_vote.rect.y - 18
+        if self.fueled_list:
+            draw_text(self.screen, f"Asperges : {', '.join(self.fueled_list[:3])}",
+                      f["xs"], (220, 120, 20), topleft=(self.btn_vote.rect.x, iy))
+
+    def _draw_hunter_buttons(self, f: dict, mouse):
+        shoot_ok = (self.selected_target is not None)
+        self.btn_hunter_shoot.text = "TIRER"
+        self.btn_hunter_shoot.draw(self.screen, f["small"], mouse, enabled=shoot_ok)
+        iy = self.btn_hunter_shoot.rect.y - 18
+        draw_text(self.screen, "Chasseur : choisissez votre derniere victime !",
+                  f["xs"], WOLF_RED, topleft=(self.btn_hunter_shoot.rect.x, iy))
+
+    def _draw_cupidon_buttons(self, f: dict, mouse):
+        n = len(self.multi_select_list)
+        confirm_ok = (n == 2)
+        self.btn_cupidon_confirm.text = f"CONFIRMER LES AMOUREUX ({n}/2)"
+        self.btn_cupidon_confirm.draw(self.screen, f["small"], mouse, enabled=confirm_ok)
+        iy = self.btn_cupidon_confirm.rect.y - 18
+        draw_text(self.screen, "Cliquez sur 2 joueurs qui tomberont amoureux",
+                  f["xs"], GOLD_PALE, topleft=(self.btn_cupidon_confirm.rect.x, iy))
+
+    def _draw_wild_child_buttons(self, f: dict, mouse):
+        ok = (self.selected_target is not None)
+        self.btn_wild_confirm.text = "CHOISIR CE MENTOR"
+        self.btn_wild_confirm.draw(self.screen, f["small"], mouse, enabled=ok)
+        iy = self.btn_wild_confirm.rect.y - 18
+        draw_text(self.screen, "Choisissez votre mentor (si il meurt, vous devenez loup)",
+                  f["xs"], GOLD_PALE, topleft=(self.btn_wild_confirm.rect.x, iy))
+
     def _draw_end_screen(self, f: dict, mouse):
         cr = self.center_rect
-        is_village = (self.winner == "Village")
+        win_colors = {
+            "Village":  ((20, 44, 28, 230), (56, 140, 70, 200), (80, 220, 100), "VICTOIRE DU VILLAGE !"),
+            "Loups":    ((40, 10, 16, 230), (180, 30, 48, 200), WOLF_RED,       "VICTOIRE DES LOUPS !"),
+            "Amoureux": ((40, 10, 40, 230), (200, 60, 160, 200), (240, 100, 200), "VICTOIRE DES AMOUREUX !"),
+            "Sniper":   ((20, 30, 50, 230), (60, 80, 160, 200), CYAN_COOL,      "VICTOIRE DU SNIPER !"),
+            "Sirène":   ((10, 30, 50, 230), (40, 120, 200, 200), (80, 180, 240), "VICTOIRE DE LA SIRÈNE !"),
+            "Pyromane": ((40, 20, 10, 230), (200, 80, 20, 200), (240, 120, 40), "VICTOIRE DU PYROMANE !"),
+        }
+        bg_col, brd_col, tcol, title = win_colors.get(
+            self.winner,
+            ((20, 20, 20, 230), (80, 80, 80, 200), WHITE_SOFT, f"VICTOIRE : {self.winner} !"))
+
         bg = pygame.Surface((cr.width, cr.height), pygame.SRCALPHA)
-        bg_col  = (20, 44, 28, 230) if is_village else (40, 10, 16, 230)
-        brd_col = (56, 140, 70, 200) if is_village else (180, 30, 48, 200)
         pygame.draw.rect(bg, bg_col,  (0, 0, cr.width, cr.height), border_radius=22)
         pygame.draw.rect(bg, brd_col, (0, 0, cr.width, cr.height), width=3, border_radius=22)
         self.screen.blit(bg, cr.topleft)
 
-        title = "VICTOIRE DU VILLAGE !" if is_village else "VICTOIRE DES LOUPS !"
-        tcol  = (80, 220, 100) if is_village else WOLF_RED
         draw_text(self.screen, title, f["big"], tcol,
                   center=(cr.centerx, cr.y + 42), shadow=True)
         draw_text(self.screen, self.message, f["xs"], GOLD_PALE,
@@ -936,7 +1207,8 @@ class WerewolfOnlineGame:
                 break
             role_str = p.get("revealed_role") or p.get("role") or "?"
             alive    = p["alive"]
-            bg2 = (52, 14, 14) if is_wolf_role(role_str) else \
+            is_wolf  = is_wolf_role(role_str)
+            bg2 = (52, 14, 14) if is_wolf else \
                   (24, 52, 28) if alive else (30, 26, 48)
             row = pygame.Rect(cr.x + 14, y, col_w, 26)
             pygame.draw.rect(self.screen, bg2, row, border_radius=8)
@@ -960,7 +1232,7 @@ class WerewolfOnlineGame:
 
         vis_top = self.chat_rect.y + 54
         vis_bot = self.chat_rect.bottom - 66
-        line_h  = 40          # hauteur par entrée de chat (auteur + message)
+        line_h  = 40
         avail   = max(0, vis_bot - vis_top)
         max_vis = max(1, avail // line_h)
 
@@ -989,7 +1261,6 @@ class WerewolfOnlineGame:
                       topleft=(self.chat_rect.x + 18, y + 18))
             y += line_h
 
-        # Scrollbar
         if total > max_vis and max_scr > 0:
             bx  = self.chat_rect.right - 10
             bh  = vis_bot - vis_top
@@ -998,7 +1269,6 @@ class WerewolfOnlineGame:
             ty2 = vis_top + int((bh - th) * (self.chat_scroll / max_scr))
             pygame.draw.rect(self.screen, CYAN_COOL, (bx, ty2, 5, th), border_radius=3)
 
-        # Desactiver le chat si non autorise (nuit, non-loup)
         chat_allowed = self.can_chat
         if not chat_allowed:
             overlay = pygame.Surface((self.chat_rect.width - 4, 46), pygame.SRCALPHA)
@@ -1042,15 +1312,43 @@ class WerewolfOnlineGame:
 
     # ── Événements ───────────────────────────────────────────────────────────
 
+    def _try_select_player(self, pos) -> bool:
+        """Tente de sélectionner un joueur. Gère le mode multi-select si besoin.
+        Retourne True si un joueur a été sélectionné."""
+        role = self.current_role() or ""
+        step = self.night_step
+        # Multi-select : Cupidon (2) et Renard (3)
+        is_multi = (
+            self.can_act and self.phase == "night"
+            and ((role == "Cupidon" and step == "cupidon" and self.night_targets_needed == 2)
+                 or (role == "Renard" and step == "fox" and self.night_targets_needed == 3))
+        )
+        max_sel = self.night_targets_needed if is_multi else 1
+
+        for pid, rect in self.player_rects:
+            if not rect.collidepoint(pos):
+                continue
+            p = next((pl for pl in self.players if pl["id"] == pid), None)
+            if p is None or not p["alive"] or pid == self.your_id:
+                continue
+
+            if is_multi:
+                if pid in self.multi_select_list:
+                    self.multi_select_list.remove(pid)
+                elif len(self.multi_select_list) < max_sel:
+                    self.multi_select_list.append(pid)
+            else:
+                self.selected_target = pid
+            return True
+        return False
+
     def handle_event(self, event):
         if event.type == pygame.MOUSEWHEEL:
             pos = pygame.mouse.get_pos()
             if self.chat_rect.collidepoint(pos):
-                # Molette haut (y>0) = messages plus anciens = scroll augmente
                 self.chat_scroll = max(0, self.chat_scroll + event.y)
                 return
             if self.phase == "lobby" and self.role_list_rect.collidepoint(pos):
-                # Molette haut = remonter dans la liste = scroll diminue (offset depuis le haut)
                 self.role_scroll = max(0, self.role_scroll - event.y * 24)
                 self.show_role_info = False
                 return
@@ -1073,7 +1371,6 @@ class WerewolfOnlineGame:
             if self.role_info_close_rect.collidepoint(event.pos):
                 self.show_role_info = False
                 return
-            # Clic hors des lignes rôles => fermer
             on_row = any(r.collidepoint(event.pos) for r in self.role_row_rects.values())
             on_pm  = any(r.collidepoint(event.pos) for r in self.role_minus_rects.values())
             on_pp  = any(r.collidepoint(event.pos) for r in self.role_plus_rects.values())
@@ -1113,46 +1410,107 @@ class WerewolfOnlineGame:
                 self.send_action()
             return
 
-        # Bouton retour menu (ecran de fin)
         if self.phase == "end" and self.btn_end.is_clicked(event.pos):
             self.running = False
             return
 
-        # Selection joueur en jeu
-        for pid, rect in self.player_rects:
-            if rect.collidepoint(event.pos):
-                for p in self.players:
-                    if p["id"] == pid and p["alive"] and pid != self.your_id:
-                        self.selected_target = pid
-                        return
+        # Sélection joueur (inclut multi-select)
+        if self._try_select_player(event.pos):
+            return
 
-        # Actions phase nuit/jour
+        # Boutons d'action selon rôle / étape
         role = self.current_role() or ""
-        is_witch  = (role == "Sorcière") and self.phase == "night"
-        is_father = (role == "Infect Père des Loups" and self.phase == "night"
-                     and self.night_step == "father")
 
-        if is_father and self.can_act:
-            if self.btn_father_infect.is_clicked(event.pos):
-                self.send_father_infect()
-                return
-            if self.btn_father_skip.is_clicked(event.pos):
-                self.send_father_skip()
+        # Chasseur (priorité absolue)
+        if self.is_hunter_turn and self.can_act:
+            if self.btn_hunter_shoot.is_clicked(event.pos):
+                self.send_hunter_shoot()
                 return
 
-        if is_witch and self.can_act:
-            if self.btn_save.is_clicked(event.pos):
-                self.send_witch_save()
-                return
-            if self.btn_poison.is_clicked(event.pos):
-                self.send_witch_poison()
-                return
-            if self.btn_skip.is_clicked(event.pos):
-                self.send_witch_skip()
+        if self.phase == "night" and self.can_act:
+            step = self.night_step
+
+            # Père des Loups
+            if role == "Infect Père des Loups" and step == "father":
+                if self.btn_father_infect.is_clicked(event.pos):
+                    self.send_father_infect()
+                    return
+                if self.btn_father_skip.is_clicked(event.pos):
+                    self.send_father_skip()
+                    return
+
+            # Sorcière
+            elif role == "Sorcière" and step == "witch":
+                if self.btn_save.is_clicked(event.pos):
+                    self.send_witch_save()
+                    return
+                if self.btn_poison.is_clicked(event.pos):
+                    self.send_witch_poison()
+                    return
+                if self.btn_skip.is_clicked(event.pos):
+                    self.send_witch_skip()
+                    return
+
+            # Salvateur
+            elif role == "Salvateur" and step == "salvateur":
+                if self.btn_vote.is_clicked(event.pos):
+                    self.send_action()
+                    return
+                if self.btn_salvateur_skip.is_clicked(event.pos):
+                    self.send_salvateur_skip()
+                    return
+
+            # Renard
+            elif role == "Renard" and step == "fox":
+                if self.btn_fox_confirm.is_clicked(event.pos):
+                    self.send_fox_sense()
+                    return
+                if self.btn_fox_skip.is_clicked(event.pos):
+                    self.send_fox_skip()
+                    return
+
+            # Sirène
+            elif role == "Sirène" and step == "siren":
+                if self.btn_vote.is_clicked(event.pos):
+                    self.send_action()
+                    return
+                if self.btn_siren_skip.is_clicked(event.pos):
+                    self.send_siren_skip()
+                    return
+
+            # Pyromane
+            elif role == "Pyromane" and step == "arsonist":
+                if self.btn_vote.is_clicked(event.pos):
+                    self.send_action()
+                    return
+                if self.btn_arsonist_ignite.is_clicked(event.pos):
+                    self.send_arsonist_ignite()
+                    return
+                if self.btn_arsonist_skip.is_clicked(event.pos):
+                    self.send_arsonist_skip()
+                    return
+
+            # Cupidon
+            elif role == "Cupidon" and step == "cupidon":
+                if self.btn_cupidon_confirm.is_clicked(event.pos):
+                    self.send_cupidon_confirm()
+                    return
+
+            # Enfant sauvage
+            elif role == "Enfant sauvage" and step == "wild_child":
+                if self.btn_wild_confirm.is_clicked(event.pos):
+                    self.send_action()
+                    return
+
+            # Loups / Voyante — bouton standard
+            elif self.btn_vote.is_clicked(event.pos):
+                self.send_action()
                 return
 
-        if self.phase in ("night", "day") and self.btn_vote.is_clicked(event.pos):
-            self.send_action()
+        elif self.phase == "day":
+            if self.btn_vote.is_clicked(event.pos):
+                self.send_action()
+                return
 
     # ── Boucle ───────────────────────────────────────────────────────────────
 

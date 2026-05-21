@@ -1,9 +1,7 @@
 """
 loup_shared.py – Logique de jeu partagée entre le mode solo et le mode en ligne.
-
 Contient le catalogue des rôles, les fonctions de construction de parties
-et les fonctions de vérification de victoire. Ce module ne dépend pas de
-pygame et peut être importé côté serveur comme côté client.
+et les fonctions de vérification de victoire.
 """
 import random
 from collections import Counter
@@ -11,12 +9,6 @@ from collections import Counter
 MIN_PLAYERS = 3
 MAX_PLAYERS = 12
 
-# Catalogue complet des rôles : chaque entrée définit le camp, l'aura,
-# le nombre maximum autorisé, et si le rôle agit la nuit.
-# weight = puissance du rôle en équivalent-villageois.
-# Les loups ont un poids élevé (ils tuent la nuit ET votent le jour).
-# Les rôles village spéciaux ont un poids > 1.0.
-# Villageois de base = 1.0 (référence).
 ROLE_CATALOG = {
     "Loup-garou": {
         "camp": "Loups",
@@ -33,7 +25,7 @@ ROLE_CATALOG = {
         "max": 1,
         "night_action": True,
         "weight": 2.5,
-        "description": "Loup spécial. Après le vote des loups, il peut infecter la victime désignée UNE seule fois par partie. La victime devient loup tout en conservant ses capacités d'origine.",
+        "description": "Loup spécial. Après le vote des loups, il peut infecter la victime désignée UNE seule fois. La victime devient loup tout en conservant ses capacités d'origine.",
         "ui_icon": "IP",
     },
     "Voyante": {
@@ -42,16 +34,16 @@ ROLE_CATALOG = {
         "max": 1,
         "night_action": True,
         "weight": 1.8,
-        "description": "Chaque nuit, vous pouvez choisir un joueur pour découvrir son rôle.",
+        "description": "Chaque nuit, vous choisissez un joueur pour découvrir son rôle exact.",
         "ui_icon": "VO",
     },
     "Cupidon": {
         "camp": "Village",
         "aura": "Claire",
         "max": 1,
-        "night_action": False,
+        "night_action": True,
         "weight": 1.1,
-        "description": "Lors de la première nuit, vous pouvez former un couple amoureux. Dans cette version, le rôle est attribué et affiché, mais son pouvoir n'est pas encore jouable.",
+        "description": "La première nuit uniquement, vous choisissez deux joueurs qui tombent amoureux. Si l'un meurt, l'autre meurt de chagrin. S'ils sont les deux derniers survivants, ils gagnent ensemble.",
         "ui_icon": "CU",
     },
     "Sorcière": {
@@ -60,7 +52,7 @@ ROLE_CATALOG = {
         "max": 1,
         "night_action": True,
         "weight": 2.0,
-        "description": "Vous avez une potion de soin et une potion de mort. Vous pouvez sauver la victime des loups ou empoisonner un joueur.",
+        "description": "Vous avez une potion de soin (sauver la victime des loups) et une potion de mort (empoisonner n'importe quel joueur). Chacune ne peut être utilisée qu'une seule fois.",
         "ui_icon": "SO",
     },
     "Chasseur": {
@@ -69,7 +61,7 @@ ROLE_CATALOG = {
         "max": 1,
         "night_action": False,
         "weight": 1.4,
-        "description": "Lorsque vous mourrez, vous pouvez éliminer un autre joueur.",
+        "description": "Lorsque vous mourez (nuit ou jour), vous choisissez immédiatement un joueur à éliminer avec vous.",
         "ui_icon": "CH",
     },
     "Sniper": {
@@ -78,34 +70,34 @@ ROLE_CATALOG = {
         "max": 1,
         "night_action": False,
         "weight": 1.0,
-        "description": "Une cible vous est attribuée. Vous gagnez si elle est éliminée par le vote du village avant votre mort. Condition spéciale non encore jouable dans cette version.",
+        "description": "Une cible secrète vous est attribuée en début de partie. Vous gagnez seul si cette cible est éliminée par le vote du village pendant que vous êtes encore en vie.",
         "ui_icon": "SN",
     },
     "Salvateur": {
         "camp": "Village",
         "aura": "Claire",
         "max": 1,
-        "night_action": False,
+        "night_action": True,
         "weight": 1.3,
-        "description": "Chaque nuit, il protège une personne différente. Dans cette version, le rôle est attribué mais le pouvoir n'est pas encore jouable.",
+        "description": "Chaque nuit, vous protégez un joueur de l'attaque des loups. Vous ne pouvez pas protéger la même personne deux nuits consécutives.",
         "ui_icon": "SA",
     },
     "Renard": {
         "camp": "Village",
         "aura": "Claire",
         "max": 1,
-        "night_action": False,
+        "night_action": True,
         "weight": 1.2,
-        "description": "Il peut sentir parmi trois personnes si un loup se cache entre elles. Dans cette version, le rôle est attribué mais le pouvoir n'est pas encore jouable.",
+        "description": "Chaque nuit, choisissez 3 joueurs : vous saurez s'il y a un loup parmi eux. Si vous vous trompez (aucun loup parmi les 3), vous perdez définitivement ce pouvoir.",
         "ui_icon": "RE",
     },
     "Enfant sauvage": {
         "camp": "Village / Loups",
         "aura": "Claire",
         "max": 1,
-        "night_action": False,
+        "night_action": True,
         "weight": 0.8,
-        "description": "Il choisit un mentor en début de partie et devient loup si ce mentor meurt. Dans cette version, le rôle est attribué mais le basculement n'est pas encore jouable.",
+        "description": "La première nuit, vous choisissez un mentor parmi les joueurs vivants. Si votre mentor meurt (quelle qu'en soit la cause), vous basculez du côté des loups.",
         "ui_icon": "ES",
     },
     "Villageois Maudit": {
@@ -114,25 +106,25 @@ ROLE_CATALOG = {
         "max": 1,
         "night_action": False,
         "weight": 0.8,
-        "description": "Villageois au départ, il devient loup si les loups tentent de le tuer. Dans cette version, le rôle est attribué mais la conversion n'est pas encore jouable.",
+        "description": "Villageois ordinaire au départ. Si les loups vous choisissent comme victime une nuit, au lieu de mourir vous vous transformez en loup-garou. Ce pouvoir ne se déclenche qu'une seule fois.",
         "ui_icon": "VM",
     },
     "Sirène": {
         "camp": "Solo",
         "aura": "Inconnue",
         "max": 1,
-        "night_action": False,
+        "night_action": True,
         "weight": 1.1,
-        "description": "La sirène envoûte des joueurs puis peut les tuer. Dans cette version, le rôle est attribué mais le pouvoir complet n'est pas encore jouable.",
+        "description": "Chaque nuit, vous envoûtez un joueur. Vous gagnez seule si tous les joueurs encore en vie (hors vous) sont envoûtés au moment de la vérification de victoire.",
         "ui_icon": "SI",
     },
     "Pyromane": {
         "camp": "Solo",
         "aura": "Inconnue",
         "max": 1,
-        "night_action": False,
+        "night_action": True,
         "weight": 1.3,
-        "description": "Chaque nuit, il peut recouvrir des joueurs d'essence ou brûler ceux déjà marqués. Dans cette version, le rôle est attribué mais le pouvoir complet n'est pas encore jouable.",
+        "description": "Chaque nuit, vous aspergez un joueur d'essence (ou allumez le feu pour tuer tous les aspergés). Vous gagnez seul si vous éliminez ainsi tous les autres joueurs en vie.",
         "ui_icon": "PY",
     },
     "Villageois": {
@@ -146,13 +138,9 @@ ROLE_CATALOG = {
     },
 }
 
-# "Villageois" est exclu de AVAILABLE_ROLES car il se place automatiquement
-# en remplissage — on n'en configure jamais le nombre manuellement.
 AVAILABLE_ROLES = [role for role in ROLE_CATALOG.keys() if role != "Villageois"]
 ROLES_ORDER = list(AVAILABLE_ROLES) + ["Villageois"]
 
-# Séparation UI : rôles affichés dans la section "classiques" vs "spéciaux"
-# "Villageois" apparaît dans les classiques mais est géré comme remplissage
 CLASSIC_ROLE_NAMES = ["Loup-garou", "Voyante", "Sorcière", "Villageois"]
 SPECIAL_ROLE_NAMES = [
     "Infect Père des Loups",
@@ -167,34 +155,83 @@ SPECIAL_ROLE_NAMES = [
     "Pyromane",
 ]
 
-# Configuration minimale par défaut : 1 loup, 1 voyante, 1 sorcière.
 DEFAULT_ROLE_CONFIG = {
     "Loup-garou": 1,
     "Voyante": 1,
     "Sorcière": 1,
 }
 
+# Ordre officiel des tours de nuit
+NIGHT_ORDER = [
+    "cupidon",    # nuit 1 seulement
+    "wild_child", # nuit 1 seulement
+    "seer",
+    "wolves",
+    "father",
+    "witch",
+    "salvateur",
+    "fox",
+    "siren",
+    "arsonist",
+]
+
 
 def role_details(role_name):
-    """Retourne le dictionnaire de détails d'un rôle (ou Villageois par défaut)."""
     return ROLE_CATALOG.get(role_name, ROLE_CATALOG["Villageois"])
 
 
 def is_wolf_role(role_name):
-    """Retourne True si le rôle appartient au camp des loups."""
     return role_name in {"Loup-garou", "Infect Père des Loups"}
 
 
 def is_wolf_player(player):
-    """Retourne True si le joueur appartient au camp des loups (rôle loup ou infecté)."""
-    return is_wolf_role(player.get("role", "")) or player.get("infected", False)
+    """Un joueur est loup s'il a un rôle loup, s'il est infecté, ou si l'Enfant sauvage a basculé."""
+    return (is_wolf_role(player.get("role", ""))
+            or player.get("infected", False)
+            or player.get("wild_child_turned", False)
+            or player.get("maudit_converted", False))
+
+
+def check_winner(players):
+    """
+    Vérifie si une équipe a gagné.
+    Retourne "Village", "Loups", "Amoureux", "Sirène", "Pyromane", ou None.
+    Les joueurs infectés/convertis comptent dans le camp des loups.
+    """
+    alive = [p for p in players if p["alive"]]
+    if not alive:
+        return "Village"
+
+    # Amoureux : exactement les 2 amoureux sont les seuls survivants
+    lovers_alive = [p for p in alive if p.get("is_lover")]
+    if len(lovers_alive) == 2 and len(alive) == 2:
+        return "Amoureux"
+
+    # Sirène : tous les autres vivants sont envoûtés
+    siren = next((p for p in alive if p.get("role") == "Sirène"), None)
+    if siren:
+        others = [p for p in alive if p["id"] != siren["id"]]
+        if others and all(p.get("is_charmed") for p in others):
+            return "Sirène"
+
+    # Pyromane : tous les autres vivants sont aspergés (vérifié après ignition dans le code appelant)
+    pyro = next((p for p in alive if p.get("role") == "Pyromane"), None)
+    if pyro:
+        others = [p for p in alive if p["id"] != pyro["id"]]
+        if not others:
+            return "Pyromane"
+
+    alive_wolves = sum(1 for p in alive if is_wolf_player(p))
+    alive_non_wolves = len(alive) - alive_wolves
+
+    if alive_wolves == 0:
+        return "Village"
+    if alive_wolves >= alive_non_wolves:
+        return "Loups"
+    return None
 
 
 def normalize_role_config(role_config=None):
-    """
-    Retourne un dictionnaire complet {rôle: nombre} en partant de DEFAULT_ROLE_CONFIG
-    et en appliquant role_config par-dessus. Contraint chaque valeur entre 0 et max.
-    """
     config = {role: 0 for role in AVAILABLE_ROLES}
     for role, value in DEFAULT_ROLE_CONFIG.items():
         config[role] = value
@@ -202,7 +239,6 @@ def normalize_role_config(role_config=None):
         for role in AVAILABLE_ROLES:
             value = int(role_config.get(role, config.get(role, 0)))
             max_count = ROLE_CATALOG[role]["max"]
-            # Au moins 1 loup obligatoire, les autres peuvent être à 0
             if role == "Loup-garou":
                 config[role] = max(1, min(max_count, value))
             else:
@@ -211,7 +247,6 @@ def normalize_role_config(role_config=None):
 
 
 def configured_special_roles(role_config=None):
-    """Retourne la liste aplatie des rôles spéciaux selon la configuration."""
     config = normalize_role_config(role_config)
     roles = []
     for role in AVAILABLE_ROLES:
@@ -220,12 +255,10 @@ def configured_special_roles(role_config=None):
 
 
 def min_players_for_config(role_config=None):
-    """Nombre minimum de joueurs requis : au moins autant de joueurs que de rôles configurés."""
     return max(MIN_PLAYERS, len(configured_special_roles(role_config)))
 
 
 def role_config_error(player_count, role_config=None):
-    """Retourne un message d'erreur si la config est incompatible avec player_count, sinon None."""
     required = min_players_for_config(role_config)
     if player_count < required:
         return f"Il faut au moins {required} joueurs pour cette composition."
@@ -233,18 +266,9 @@ def role_config_error(player_count, role_config=None):
 
 
 def camp_balance(player_count, role_config=None):
-    """Calcule le ratio d'équilibre village/loups en tenant compte des poids des rôles.
-
-    Le poids reflète la puissance réelle du rôle :
-      - Loup-garou (2.2) : tue la nuit ET vote le jour
-      - Sorcière (2.0) : 2 potions cumulées
-      - Voyante (1.8) : information cruciale
-      - Villageois (1.0) : référence de base
-    """
     config = normalize_role_config(role_config)
     wolf_power    = 0.0
     village_power = 0.0
-
     n_wolves = 0
     n_village_specials = 0
 
@@ -261,7 +285,6 @@ def camp_balance(player_count, role_config=None):
             village_power += w * count
             n_village_specials += count
 
-    # Villageois de base (remplissage)
     n_plain_villagers = max(0, player_count - n_wolves - n_village_specials)
     village_power += n_plain_villagers * ROLE_CATALOG["Villageois"]["weight"]
 
@@ -270,11 +293,9 @@ def camp_balance(player_count, role_config=None):
         return {"village_ratio": 0.5, "wolves_ratio": 0.5,
                 "counts": {"Villageois": 0, "Loups": 0}}
 
-    village_ratio = village_power / total
-    wolf_ratio    = wolf_power    / total
     return {
-        "village_ratio": village_ratio,
-        "wolves_ratio":  wolf_ratio,
+        "village_ratio": village_power / total,
+        "wolves_ratio":  wolf_power / total,
         "counts": {
             "Villageois": player_count - n_wolves,
             "Loups":      n_wolves,
@@ -284,10 +305,6 @@ def camp_balance(player_count, role_config=None):
 
 
 def build_roles(player_count, role_config=None):
-    """
-    Construit et mélange la liste des rôles pour une partie.
-    Remplit avec des Villageois jusqu'à atteindre player_count.
-    """
     if player_count < MIN_PLAYERS:
         raise ValueError(f"Il faut au moins {MIN_PLAYERS} joueurs.")
     roles = configured_special_roles(role_config)
@@ -300,7 +317,6 @@ def build_roles(player_count, role_config=None):
 
 
 def role_config_label(role_config):
-    """Retourne une chaîne lisible de la composition (ex : 'Loup-garou, Voyante x2')."""
     config = normalize_role_config(role_config)
     parts = []
     for role in AVAILABLE_ROLES:
@@ -311,7 +327,6 @@ def role_config_label(role_config):
 
 
 def count_alive_by_role(players):
-    """Retourne un Counter {rôle: nombre de joueurs vivants}."""
     counter = Counter()
     for p in players:
         if p["alive"]:
@@ -319,43 +334,38 @@ def count_alive_by_role(players):
     return counter
 
 
-def check_winner(players):
-    """
-    Vérifie si une équipe a gagné.
-    Les loups gagnent dès qu'ils sont au moins aussi nombreux que les non-loups.
-    Retourne "Village", "Loups", ou None si la partie continue.
-    Les joueurs infectés comptent dans le camp des loups.
-    """
-    alive_wolves     = sum(1 for p in players if p["alive"] and is_wolf_player(p))
-    alive_non_wolves = sum(1 for p in players if p["alive"] and not is_wolf_player(p))
-    if alive_wolves == 0:
-        return "Village"
-    if alive_wolves >= alive_non_wolves:
-        return "Loups"
-    return None
-
-
 def serialize_players_for(player_id, players, reveal_all=False):
     """
     Sérialise la liste des joueurs du point de vue de player_id.
-    Un joueur voit son propre rôle et celui des loups s'il est loup (ou infecté).
-    En fin de partie (reveal_all=True), tous les rôles sont visibles.
+    Inclut les informations sur les amoureux, les envoûtés, les aspergés, etc.
     """
     data = []
     current_player = players[player_id] if 0 <= player_id < len(players) else None
     current_is_wolf_side = is_wolf_player(current_player) if current_player else False
+    my_lover_id = current_player.get("lover_id") if current_player else None
+
     for p in players:
         entry = {
-            "id":            p["id"],
-            "name":          p["name"],
-            "alive":         p["alive"],
-            "revealed_role": p.get("revealed_role"),
-            "infected":      False,
+            "id":             p["id"],
+            "name":           p["name"],
+            "alive":          p["alive"],
+            "revealed_role":  p.get("revealed_role"),
+            "infected":       False,
+            "is_lover":       p.get("is_lover", False),
+            "is_charmed":     p.get("is_charmed", False),
+            "is_fueled":      p.get("is_fueled", False),
+            "wild_child_turned": False,
+            "maudit_converted":  False,
         }
-        can_see = (reveal_all or p["id"] == player_id
-                   or (is_wolf_player(p) and current_is_wolf_side))
+        can_see = (reveal_all
+                   or p["id"] == player_id
+                   or (is_wolf_player(p) and current_is_wolf_side)
+                   or my_lover_id == p["id"])  # amoureux voient le rôle de leur partenaire
+
         if can_see:
-            entry["role"]     = p["role"]
-            entry["infected"] = p.get("infected", False)
+            entry["role"]             = p["role"]
+            entry["infected"]         = p.get("infected", False)
+            entry["wild_child_turned"]= p.get("wild_child_turned", False)
+            entry["maudit_converted"] = p.get("maudit_converted", False)
         data.append(entry)
     return data
