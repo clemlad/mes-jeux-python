@@ -40,6 +40,11 @@ games = [
 # =========================
 
 def launch_game(script):
+    """
+    Ferme pygame, lance le jeu indiqué dans un subprocess, puis relance le launcher.
+
+    :param script: Nom du fichier Python à exécuter (str), ex : 'snake.py'.
+    """
     pygame.quit()
 
     path = os.path.join(os.path.dirname(__file__), script)
@@ -55,10 +60,17 @@ def launch_game(script):
 
 class Button:
     def __init__(self, text, rect):
+        """
+        Initialise un bouton avec un label et une zone de clic.
+
+        :param text: Texte affiché sur le bouton (str).
+        :param rect: Position et dimensions du bouton, tuple (x, y, w, h) ou pygame.Rect.
+        """
         self.text = text
         self.rect = pygame.Rect(rect)
 
     def draw(self):
+        """Dessine le bouton sur l'écran global, change de couleur au survol de la souris."""
         mouse = pygame.mouse.get_pos()
         color = LIGHT_GRAY if self.rect.collidepoint(mouse) else GRAY
 
@@ -75,6 +87,12 @@ class Button:
         )
 
     def clicked(self, pos):
+        """
+        Retourne True si la position donnée est dans la zone du bouton.
+
+        :param pos: Coordonnées (x, y) de la souris (tuple[int, int]).
+        :return: bool
+        """
         return self.rect.collidepoint(pos)
 
 # =========================

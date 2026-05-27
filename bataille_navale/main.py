@@ -29,15 +29,34 @@ SCROLL_THUMB_H = (120, 165, 220)
 
 class Button:
     def __init__(self, text, color, hover):
+        """
+        Initialise un bouton UI avec ses couleurs normale et survolée.
+
+        :param text: Texte affiché sur le bouton (str).
+        :param color: Couleur de fond normale (tuple RGB).
+        :param hover: Couleur de fond au survol de la souris (tuple RGB).
+        """
         self.text = text
         self.color = color
         self.hover = hover
         self.rect = pygame.Rect(0, 0, 0, 0)
 
     def set_rect(self, rect):
+        """
+        Définit la position et les dimensions du bouton.
+
+        :param rect: Tuple (x, y, w, h) ou pygame.Rect.
+        """
         self.rect = pygame.Rect(rect)
 
     def draw(self, surface, font, mouse_pos):
+        """
+        Dessine le bouton sur une surface, en changeant la couleur si la souris le survole.
+
+        :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+        :param font: Police utilisée pour le texte (pygame.font.Font).
+        :param mouse_pos: Position actuelle de la souris (tuple[int, int]).
+        """
         color = self.hover if self.rect.collidepoint(mouse_pos) else self.color
         pygame.draw.rect(surface, color, self.rect, border_radius=max(12, self.rect.height // 4))
         pygame.draw.rect(surface, BUTTON_BORDER, self.rect, 2, border_radius=max(12, self.rect.height // 4))
@@ -45,19 +64,41 @@ class Button:
         surface.blit(img, img.get_rect(center=self.rect.center))
 
     def is_clicked(self, pos):
+        """
+        Retourne True si la position donnée est dans la zone du bouton.
+
+        :param pos: Coordonnées (x, y) du clic (tuple[int, int]).
+        :return: bool
+        """
         return self.rect.collidepoint(pos)
 
 
 class InputBox:
     def __init__(self, text=""):
+        """
+        Initialise un champ de saisie de texte.
+
+        :param text: Texte initial du champ (str), vide par défaut.
+        """
         self.rect = pygame.Rect(0, 0, 0, 0)
         self.text = text
         self.active = False
 
     def set_rect(self, rect):
+        """
+        Définit la position et les dimensions du champ de saisie.
+
+        :param rect: Tuple (x, y, w, h) ou pygame.Rect.
+        """
         self.rect = pygame.Rect(rect)
 
     def draw(self, surface, font):
+        """
+        Dessine le champ de saisie avec le texte actuel (ou un placeholder si vide).
+
+        :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+        :param font: Police utilisée pour le texte (pygame.font.Font).
+        """
         color = (26, 46, 76) if self.active else (16, 30, 52)
         radius = max(12, self.rect.height // 4)
         pygame.draw.rect(surface, color, self.rect, border_radius=radius)
@@ -67,6 +108,11 @@ class InputBox:
         surface.blit(img, (self.rect.x + 14, self.rect.centery - img.get_height() // 2))
 
     def handle_event(self, event):
+        """
+        Traite les événements clavier et souris pour activer/désactiver le champ et modifier son contenu.
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.MOUSEBUTTONDOWN:
             self.active = self.rect.collidepoint(event.pos)
         elif event.type == pygame.KEYDOWN and self.active:
@@ -79,6 +125,13 @@ class InputBox:
 
 
 def draw_vertical_gradient(surface, top_color, bottom_color):
+    """
+    Dessine un dégradé vertical ligne par ligne entre deux couleurs sur une surface.
+
+    :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+    :param top_color: Couleur en haut du dégradé (tuple RGB).
+    :param bottom_color: Couleur en bas du dégradé (tuple RGB).
+    """
     width, height = surface.get_size()
     for y in range(height):
         ratio = y / max(1, height)
@@ -87,6 +140,11 @@ def draw_vertical_gradient(surface, top_color, bottom_color):
 
 
 def draw_ocean_overlay(surface):
+    """
+    Dessine une grille de lignes horizontales et verticales pour simuler un quadrillage océan.
+
+    :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+    """
     width, height = surface.get_size()
     step_y = max(36, height // 14)
     step_x = max(52, width // 14)
@@ -97,6 +155,13 @@ def draw_ocean_overlay(surface):
 
 
 def draw_glass_panel(surface, rect, radius=22):
+    """
+    Dessine un panneau semi-transparent avec bord arrondi (effet verre).
+
+    :param surface: Surface pygame cible (pygame.Surface).
+    :param rect: Zone du panneau (pygame.Rect).
+    :param radius: Rayon des coins arrondis en pixels (int), 22 par défaut.
+    """
     panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
     pygame.draw.rect(panel, PANEL_FILL, (0, 0, rect.width, rect.height), border_radius=radius)
     pygame.draw.rect(panel, PANEL_BORDER, (0, 0, rect.width, rect.height), width=1, border_radius=radius)
@@ -104,6 +169,17 @@ def draw_glass_panel(surface, rect, radius=22):
 
 
 def draw_text(surface, text, font, color, center=None, topleft=None):
+    """
+    Dessine du texte sur une surface, positionné par son centre ou son coin supérieur gauche.
+
+    :param surface: Surface pygame cible (pygame.Surface).
+    :param text: Chaîne de texte à afficher (str).
+    :param font: Police utilisée (pygame.font.Font).
+    :param color: Couleur du texte (tuple RGB).
+    :param center: Coordonnées (x, y) du centre du texte (tuple[int, int] ou None).
+    :param topleft: Coordonnées (x, y) du coin supérieur gauche (tuple[int, int] ou None).
+    :return: pygame.Rect du texte rendu.
+    """
     img = font.render(text, True, color)
     rect = img.get_rect()
     if center is not None:
@@ -142,6 +218,11 @@ class MainApp:
         self.drag_scroll_start_offset = 0
 
     def fonts(self):
+        """
+        Retourne un dictionnaire de polices redimensionnées selon la taille actuelle de la fenêtre.
+
+        :return: dict avec les clés 'small', 'medium', 'big' (pygame.font.Font).
+        """
         w, h = self.screen.get_size()
         scale = min(w / BASE_W, h / BASE_H)
         return {
@@ -151,10 +232,20 @@ class MainApp:
         }
 
     def valid_name(self):
+        """
+        Retourne le nom saisi dans le champ, tronqué à 20 caractères ; 'Joueur' si vide.
+
+        :return: str
+        """
         name = self.input_name.text.strip()
         return name[:20] if name else "Joueur"
 
     def launch_game(self, host):
+        """
+        Lance une partie en ligne en se connectant au serveur indiqué, puis restaure le menu.
+
+        :param host: Adresse IP du serveur auquel se connecter (str), ex : '192.168.1.10'.
+        """
         current_size = self.screen.get_size()
         game = NavalStrikeOnlineGame(host, self.valid_name())
         game.run()
@@ -169,6 +260,7 @@ class MainApp:
         self.message = "Retour au menu."
 
     def create_server(self):
+        """Crée un serveur local, le démarre dans un thread, puis connecte le joueur en localhost."""
         if self.hosted_server is not None:
             try:
                 self.hosted_server.shutdown()
@@ -181,6 +273,7 @@ class MainApp:
         self.launch_game("127.0.0.1")
 
     def join_selected_server(self):
+        """Rejoint le serveur actuellement sélectionné dans la liste de découverte réseau."""
         servers = self.discovery.get_servers()
         if not servers:
             self.message = "Aucun serveur trouvé sur le réseau local."
@@ -191,6 +284,11 @@ class MainApp:
         self.launch_game(host)
 
     def menu_layout(self):
+        """
+        Calcule et applique la disposition du menu principal selon la taille de la fenêtre.
+
+        :return: pygame.Rect du panneau central.
+        """
         w, h = self.screen.get_size()
         panel_w = min(int(w * 0.64), 680)
         panel_h = min(int(h * 0.62), 460)
@@ -206,6 +304,11 @@ class MainApp:
         return pygame.Rect(panel_x, panel_y, panel_w, panel_h)
 
     def join_layout(self):
+        """
+        Calcule et applique la disposition de l'écran de liste des serveurs.
+
+        :return: pygame.Rect du panneau principal.
+        """
         w, h = self.screen.get_size()
         panel = pygame.Rect(max(32, int(w * 0.09)), max(32, int(h * 0.08)), w - max(64, int(w * 0.18)), h - max(110, int(h * 0.16)))
         btn_h = max(46, int(h * 0.07))
@@ -214,6 +317,13 @@ class MainApp:
         return panel
 
     def get_join_list_geometry(self, servers_count):
+        """
+        Calcule les dimensions et positions de la liste de serveurs et de sa barre de défilement.
+
+        :param servers_count: Nombre de serveurs à afficher (int).
+        :return: dict contenant 'panel', 'list_top', 'list_bottom', 'list_left', 'list_right',
+                 'row_h', 'visible', 'scrollbar' (pygame.Rect).
+        """
         panel = self.join_layout()
         list_top = panel.y + 130
         list_bottom = panel.bottom - 20
@@ -234,12 +344,22 @@ class MainApp:
         }
 
     def clamp_scroll(self, servers):
+        """
+        Limite l'offset de défilement et l'index sélectionné aux bornes valides.
+
+        :param servers: Liste de dictionnaires serveurs (list[dict]).
+        """
         geometry = self.get_join_list_geometry(len(servers))
         max_offset = max(0, len(servers) - geometry["visible"])
         self.scroll_offset = max(0, min(self.scroll_offset, max_offset))
         self.selected_index = max(0, min(self.selected_index, max(0, len(servers) - 1)))
 
     def ensure_selected_visible(self, servers):
+        """
+        Ajuste l'offset de défilement pour que l'entrée sélectionnée soit toujours visible.
+
+        :param servers: Liste de dictionnaires serveurs (list[dict]).
+        """
         if not servers:
             self.selected_index = 0
             self.scroll_offset = 0
@@ -254,12 +374,24 @@ class MainApp:
         self.clamp_scroll(servers)
 
     def scroll_servers(self, delta, servers):
+        """
+        Déplace l'offset de défilement de la liste de serveurs.
+
+        :param delta: Nombre de lignes à défiler (int, positif = vers le bas).
+        :param servers: Liste de dictionnaires serveurs (list[dict]).
+        """
         if not servers:
             return
         self.scroll_offset += delta
         self.clamp_scroll(servers)
 
     def update_scroll_from_thumb(self, mouse_y, servers):
+        """
+        Met à jour l'offset de défilement lors du glissement de la molette scrollbar.
+
+        :param mouse_y: Coordonnée Y actuelle de la souris (int).
+        :param servers: Liste de dictionnaires serveurs (list[dict]).
+        """
         if not servers:
             return
         geometry = self.get_join_list_geometry(len(servers))
@@ -278,6 +410,7 @@ class MainApp:
         self.clamp_scroll(servers)
 
     def draw_menu(self):
+        """Dessine l'écran principal du menu (saisie du nom, boutons créer/rejoindre)."""
         f = self.fonts()
         w, h = self.screen.get_size()
         panel = self.menu_layout()
@@ -291,6 +424,7 @@ class MainApp:
         draw_text(self.screen, self.message, f["small"], WHITE, center=(w // 2, min(h - 28, panel.bottom + 34)))
 
     def draw_join(self):
+        """Dessine l'écran de liste des serveurs disponibles avec scrollbar et sélection."""
         f = self.fonts()
         w, h = self.screen.get_size()
         panel = self.join_layout()
@@ -351,6 +485,11 @@ class MainApp:
         draw_text(self.screen, "Entrée pour rejoindre, molette/flèches pour défiler, Échap pour revenir.", f["small"], WHITE, center=(w // 2, h - 16 - self.back_btn.rect.height // 2))
 
     def handle_menu_event(self, event):
+        """
+        Traite les événements de l'écran de menu principal (saisie, clics sur les boutons).
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         self.input_name.handle_event(event)
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.create_btn.is_clicked(event.pos):
@@ -363,6 +502,11 @@ class MainApp:
             self.create_server()
 
     def handle_join_event(self, event):
+        """
+        Traite les événements de l'écran de liste des serveurs (clics, clavier, molette, scrollbar).
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         servers = self.discovery.get_servers()
         self.clamp_scroll(servers)
 
@@ -423,6 +567,7 @@ class MainApp:
                 self.join_selected_server()
 
     def run(self):
+        """Lance la boucle principale du menu : gestion des événements, dessin et flip d'écran."""
         while self.running:
             self.clock.tick(60)
             draw_vertical_gradient(self.screen, BG_TOP, BG_BOTTOM)

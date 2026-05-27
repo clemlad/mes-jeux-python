@@ -10,6 +10,13 @@ PORT = 5555
 
 class NavalServer:
     def __init__(self, host_name="Joueur", host=HOST, port=PORT):
+        """
+        Initialise le serveur TCP de Bataille Navale pour deux joueurs.
+
+        :param host_name: Nom du joueur hôte, utilisé dans le nom de la partie (str).
+        :param host: Adresse d'écoute du serveur (str), '0.0.0.0' par défaut.
+        :param port: Port TCP d'écoute (int), 5555 par défaut.
+        """
         self.host = host
         self.port = port
         self.server_name = f"Partie de {host_name}"
@@ -24,6 +31,7 @@ class NavalServer:
         self.reset_game()
 
     def reset_game(self):
+        """Réinitialise l'état de la partie : grilles, placements, tour, gagnant et demandes de revanche."""
         self.boards = [Board(), Board()]
         self.placed = [False, False]
         self.current_turn = 0
@@ -32,15 +40,33 @@ class NavalServer:
         self.rematch_requests = set()
 
     def connected_player_count(self):
+        """Retourne le nombre de joueurs actuellement connectés (int, 0 à 2)."""
         return sum(1 for conn in self.clients if conn is not None)
 
     def safe_name(self, player_id):
+        """
+        Retourne le nom enregistré du joueur, ou un nom par défaut s'il est absent.
+
+        :param player_id: Indice du joueur (int), 0 ou 1.
+        :return: str
+        """
         return self.player_names[player_id] or f"Joueur {player_id + 1}"
 
     def send_json(self, conn, data):
+        """
+        Sérialise `data` en JSON et l'envoie sur la connexion avec un saut de ligne comme délimiteur.
+
+        :param conn: Socket client connecté (socket.socket).
+        :param data: Dictionnaire Python à envoyer (dict).
+        """
         conn.sendall((json.dumps(data) + "\n").encode("utf-8"))
 
     def broadcast(self, data):
+        """
+        Envoie un message JSON à tous les joueurs connectés.
+
+        :param data: Dictionnaire Python à diffuser (dict).
+        """
         for conn in self.clients:
             if conn is not None:
                 try:
@@ -49,6 +75,12 @@ class NavalServer:
                     pass
 
     def player_snapshot(self, player_id):
+        """
+        Construit un dict d'état de jeu personnalisé pour le joueur donné (sa grille visible, celle de l'ennemi masquée).
+
+        :param player_id: Indice du joueur destinataire (int), 0 ou 1.
+        :return: dict contenant le type 'state_sync', les grilles, le tour, le gagnant, etc.
+        """
         enemy = 1 - player_id
         return {
             "type": "state_sync",
@@ -63,12 +95,26 @@ class NavalServer:
         }
 
     def handle_join(self, player_id, msg):
+        """
+        Enregistre le nom du joueur lors de sa connexion et diffuse son arrivée.
+
+        :param player_id: Indice du joueur (int), 0 ou 1.
+        :param msg: Message reçu contenant la clé 'name' (dict).
+        :return: dict snapshot d'état pour le joueur.
+        """
         name = str(msg.get("name", "")).strip()[:20] or f"Joueur {player_id + 1}"
         self.player_names[player_id] = name
         self.broadcast({"type": "info", "message": f"{name} a rejoint la partie."})
         return self.player_snapshot(player_id)
 
     def handle_place(self, player_id, msg):
+        """
+        Valide et enregistre le placement des bateaux d'un joueur ; démarre la partie si les deux ont placé.
+
+        :param player_id: Indice du joueur (int), 0 ou 1.
+        :param msg: Message contenant la clé 'layout' (list de dicts) décrivant les positions des bateaux.
+        :return: dict d'erreur ou d'info, ou None si la partie démarre (les snapshots sont envoyés directement).
+        """
         if self.placed[player_id]:
             return {"type": "error", "message": "Placement déjà validé."}
         layout = msg.get("layout", [])
@@ -96,6 +142,13 @@ class NavalServer:
         return None
 
     def handle_shoot(self, player_id, msg):
+        """
+        Traite un tir du joueur sur la grille adverse et met à jour l'état de la partie.
+
+        :param player_id: Indice du joueur qui tire (int), 0 ou 1.
+        :param msg: Message contenant les clés 'row' et 'col' (int) des coordonnées visées.
+        :return: dict d'erreur ou None (les mises à jour sont broadcastées directement).
+        """
         if not self.game_started or self.winner is not None:
             return {"type": "error", "message": "La partie n'a pas commencé."}
         if self.current_turn != player_id:
@@ -134,6 +187,12 @@ class NavalServer:
         return None
 
     def handle_rematch(self, player_id):
+        """
+        Enregistre la demande de revanche d'un joueur ; réinitialise la partie si les deux joueurs acceptent.
+
+        :param player_id: Indice du joueur demandeur (int), 0 ou 1.
+        :return: dict d'erreur ou None.
+        """
         if self.winner is None:
             return {"type": "error", "message": "Le match n'est pas terminé."}
         self.rematch_requests.add(player_id)
@@ -156,6 +215,11 @@ class NavalServer:
         return None
 
     def remove_client(self, player_id):
+        """
+        Déconnecte un joueur, notifie l'autre et réinitialise la partie.
+
+        :param player_id: Indice du joueur à retirer (int), 0 ou 1.
+        """
         conn = self.clients[player_id]
         name = self.safe_name(player_id)
         self.clients[player_id] = None
@@ -169,6 +233,13 @@ class NavalServer:
         self.reset_game()
 
     def handle_client(self, conn, player_id):
+        """
+        Boucle de réception des messages d'un joueur dans son thread dédié.
+        Dispatche chaque message vers le gestionnaire approprié (join, place, shoot, etc.).
+
+        :param conn: Socket du joueur connecté (socket.socket).
+        :param player_id: Indice du joueur (int), 0 ou 1.
+        """
         try:
             self.send_json(conn, {"type": "welcome", "player_id": player_id, "server_name": self.server_name})
             buffer = ""
@@ -206,6 +277,7 @@ class NavalServer:
                     self.remove_client(player_id)
 
     def shutdown(self):
+        """Arrête le serveur proprement : notifie les clients, ferme leurs connexions et le socket serveur."""
         self.running = False
         self.broadcaster.stop()
         with self.lock:
@@ -226,6 +298,7 @@ class NavalServer:
             pass
 
     def serve_forever(self):
+        """Lance l'écoute TCP et accepte les connexions entrantes jusqu'à l'arrêt du serveur."""
         self.server.bind((self.host, self.port))
         self.server.listen(2)
         self.server.settimeout(1.0)

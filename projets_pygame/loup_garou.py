@@ -42,29 +42,55 @@ INPUT_ACTIVE = (50, 40, 80)
 # ========================
 class Joueur:
     def __init__(self, nom):
+        """
+        Initialise un joueur avec son nom, sans rôle assigné et en vie.
+
+        :param nom: Nom du joueur (str).
+        """
         self.nom    = nom
         self.role   = None
         self.vivant = True
 
     def __str__(self):
+        """Retourne une représentation textuelle du joueur avec son état et son rôle (str)."""
         return f"{self.nom} ({'Vivant' if self.vivant else 'Mort'}) - {self.role.nom if self.role else 'Aucun'}"
 
 
 class Role:
     def __init__(self, nom, description, pouvoir="aucun"):
+        """
+        Initialise un rôle générique du jeu du Loup-Garou.
+
+        :param nom: Nom du rôle (str), ex : 'Villageois'.
+        :param description: Texte de présentation du rôle (str).
+        :param pouvoir: Type de pouvoir du rôle (str) : 'tuer', 'voir', 'soigner' ou 'aucun'.
+        """
         self.nom         = nom
         self.description = description
         self.pouvoir     = pouvoir   # "tuer", "voir", "soigner", "aucun"
 
     def action_nuit(self, jeu, joueur):
+        """
+        Exécute l'action nocturne du rôle (méthode à surcharger dans les sous-classes).
+
+        :param jeu: Instance du jeu en cours (Jeu).
+        :param joueur: Joueur qui exécute l'action (Joueur).
+        """
         pass
 
 
 class LoupGarou(Role):
     def __init__(self):
+        """Initialise le rôle Loup-Garou avec son pouvoir de tuer."""
         super().__init__("Loup-Garou", "Chaque nuit, les loups choisissent une victime à dévorer.", "tuer")
 
     def action_nuit(self, jeu, joueur):
+        """
+        Choisit aléatoirement une victime vivante parmi les autres joueurs et la tue.
+
+        :param jeu: Instance du jeu en cours (Jeu).
+        :param joueur: Joueur Loup-Garou qui agit (Joueur).
+        """
         vivants = [j for j in jeu.joueurs if j.vivant and j != joueur]
         if vivants:
             cible = random.choice(vivants)
@@ -73,14 +99,22 @@ class LoupGarou(Role):
 
 class Villageois(Role):
     def __init__(self):
+        """Initialise le rôle Villageois sans pouvoir spécial."""
         super().__init__("Villageois", "Aucune capacité spéciale. Sa force : observer et voter.", "aucun")
 
 
 class Voyante(Role):
     def __init__(self):
+        """Initialise le rôle Voyante avec son pouvoir de révélation."""
         super().__init__("Voyante", "Peut découvrir le rôle secret d'un joueur chaque nuit.", "voir")
 
     def action_nuit(self, jeu, joueur):
+        """
+        Révèle aléatoirement le rôle d'un autre joueur (affiché en console).
+
+        :param jeu: Instance du jeu en cours (Jeu).
+        :param joueur: Joueur Voyante qui agit (Joueur).
+        """
         vivants = [j for j in jeu.joueurs if j != joueur]
         if vivants:
             cible = random.choice(vivants)
@@ -89,6 +123,7 @@ class Voyante(Role):
 
 class Sorciere(Role):
     def __init__(self):
+        """Initialise le rôle Sorcière avec deux potions à usage unique : vie et mort."""
         super().__init__("Sorcière", "Possède une potion de vie et une potion de mort (usage unique).", "soigner")
         self.potion_vie  = True
         self.potion_mort = True
@@ -96,6 +131,7 @@ class Sorciere(Role):
 
 class Chasseur(Role):
     def __init__(self):
+        """Initialise le rôle Chasseur qui peut éliminer un joueur au moment de sa mort."""
         super().__init__("Chasseur", "À sa mort, il désigne immédiatement un joueur à éliminer.", "tuer")
         self.peut_tirer = True
 
@@ -108,6 +144,21 @@ class Bouton:
                  couleur=BG_PANEL, hover=ACCENT_BLUE,
                  text_color=WHITE, border=CARD_BORDER,
                  fonction=None, icon=""):
+        """
+        Initialise un bouton UI stylisé du jeu Loup-Garou.
+
+        :param x: Coordonnée X du coin supérieur gauche (int).
+        :param y: Coordonnée Y du coin supérieur gauche (int).
+        :param w: Largeur du bouton (int).
+        :param h: Hauteur du bouton (int).
+        :param text: Texte affiché sur le bouton (str).
+        :param couleur: Couleur de fond au repos (tuple RGB).
+        :param hover: Couleur de fond au survol (tuple RGB).
+        :param text_color: Couleur du texte (tuple RGB).
+        :param border: Couleur de la bordure (tuple RGB).
+        :param fonction: Callback appelé au clic (callable ou None).
+        :param icon: Emoji ou caractère affiché avant le texte (str).
+        """
         self.rect       = pygame.Rect(x, y, w, h)
         self.text       = text
         self.icon       = icon
@@ -119,6 +170,11 @@ class Bouton:
         self._hovered   = False
 
     def draw(self, win):
+        """
+        Dessine le bouton sur la fenêtre avec effet de survol.
+
+        :param win: Surface pygame sur laquelle dessiner (pygame.Surface).
+        """
         mouse_pos = pygame.mouse.get_pos()
         self._hovered = self.rect.collidepoint(mouse_pos)
         col = self.hover if self._hovered else self.couleur
@@ -135,6 +191,11 @@ class Bouton:
         ))
 
     def clic(self, pos):
+        """
+        Appelle la fonction callback si la position est dans la zone du bouton.
+
+        :param pos: Coordonnées (x, y) du clic (tuple[int, int]).
+        """
         if self.rect.collidepoint(pos) and self.fonction:
             self.fonction()
 
@@ -144,12 +205,26 @@ class Bouton:
 # ========================
 class ChampTexte:
     def __init__(self, x, y, w, h, placeholder=""):
+        """
+        Initialise un champ de saisie de texte avec curseur clignotant.
+
+        :param x: Coordonnée X du coin supérieur gauche (int).
+        :param y: Coordonnée Y du coin supérieur gauche (int).
+        :param w: Largeur du champ (int).
+        :param h: Hauteur du champ (int).
+        :param placeholder: Texte affiché en grisé quand le champ est vide (str).
+        """
         self.rect        = pygame.Rect(x, y, w, h)
         self.texte       = ""
         self.placeholder = placeholder
         self.active      = False
 
     def draw(self, win):
+        """
+        Dessine le champ de saisie avec le texte actuel, le placeholder et le curseur clignotant.
+
+        :param win: Surface pygame sur laquelle dessiner (pygame.Surface).
+        """
         col = INPUT_ACTIVE if self.active else INPUT_BG
         pygame.draw.rect(win, col, self.rect, border_radius=8)
         border_col = ACCENT_GOLD if self.active else CARD_BORDER
@@ -170,6 +245,11 @@ class ChampTexte:
             pygame.draw.line(win, ACCENT_GOLD, (cx, cy), (cx, self.rect.y + self.rect.h - 6), 2)
 
     def handle_event(self, event):
+        """
+        Traite les événements clavier et souris : activation au clic, saisie et effacement.
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.MOUSEBUTTONDOWN:
             self.active = self.rect.collidepoint(event.pos)
         elif event.type == pygame.KEYDOWN and self.active:
@@ -190,10 +270,26 @@ def draw_bg(win):
         pygame.draw.line(win, (25, 20, 38), (0, i), (WIDTH, i), 1)
 
 def draw_title(win, text, y=30, color=ACCENT_GOLD):
+    """
+    Dessine un titre centré en haut de la fenêtre avec la grande police.
+
+    :param win: Surface pygame cible (pygame.Surface).
+    :param text: Texte du titre (str).
+    :param y: Coordonnée Y d'affichage (int), 30 par défaut.
+    :param color: Couleur du texte (tuple RGB), or par défaut.
+    """
     surf = BIG_FONT.render(text, True, color)
     win.blit(surf, (WIDTH // 2 - surf.get_width() // 2, y))
 
 def draw_subtitle(win, text, y, color=GRAY_LIGHT):
+    """
+    Dessine un sous-titre centré avec la police moyenne.
+
+    :param win: Surface pygame cible (pygame.Surface).
+    :param text: Texte du sous-titre (str).
+    :param y: Coordonnée Y d'affichage (int).
+    :param color: Couleur du texte (tuple RGB), gris clair par défaut.
+    """
     surf = MED_FONT.render(text, True, color)
     win.blit(surf, (WIDTH // 2 - surf.get_width() // 2, y))
 
@@ -232,10 +328,27 @@ def draw_card(win, x, y, w, h, title, desc, color=ACCENT_RED, pouvoir=""):
         win.blit(ps, (x + 12, y + h - 26))
 
 def draw_panel(win, x, y, w, h):
+    """
+    Dessine un panneau arrondi avec fond et bordure colorés.
+
+    :param win: Surface pygame cible (pygame.Surface).
+    :param x: Coordonnée X du coin supérieur gauche (int).
+    :param y: Coordonnée Y du coin supérieur gauche (int).
+    :param w: Largeur du panneau (int).
+    :param h: Hauteur du panneau (int).
+    """
     pygame.draw.rect(win, BG_PANEL, (x, y, w, h), border_radius=14)
     pygame.draw.rect(win, CARD_BORDER, (x, y, w, h), 2, border_radius=14)
 
 def draw_msg(win, text, y, color=WHITE):
+    """
+    Affiche un message centré horizontalement sur la fenêtre.
+
+    :param win: Surface pygame cible (pygame.Surface).
+    :param text: Texte du message (str).
+    :param y: Coordonnée Y d'affichage (int).
+    :param color: Couleur du texte (tuple RGB), blanc par défaut.
+    """
     surf = FONT.render(text, True, color)
     win.blit(surf, (WIDTH // 2 - surf.get_width() // 2, y))
 
@@ -251,6 +364,11 @@ clients_list     = []
 is_host          = False
 
 def broadcast(msg: str):
+    """
+    Envoie un message texte à tous les clients connectés, retire ceux qui sont déconnectés.
+
+    :param msg: Message à diffuser (str).
+    """
     data = msg.encode("utf-8")
     for c in clients_list[:]:
         try:
@@ -259,6 +377,12 @@ def broadcast(msg: str):
             clients_list.remove(c)
 
 def handle_client(conn, addr):
+    """
+    Gère la connexion d'un nouveau client TCP : reçoit son nom et annonce son arrivée.
+
+    :param conn: Socket du client connecté (socket.socket).
+    :param addr: Adresse du client, tuple (ip, port) (tuple).
+    """
     try:
         nom = conn.recv(1024).decode("utf-8")
         clients_list.append(conn)
@@ -267,6 +391,11 @@ def handle_client(conn, addr):
         pass
 
 def start_server_thread(nom_partie: str):
+    """
+    Lance le serveur TCP et le broadcaster UDP dans des threads daemon.
+
+    :param nom_partie: Nom de la partie annoncé en broadcast (str).
+    """
     global server_socket, is_host
     is_host = True
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -320,6 +449,12 @@ def scan_reseau():
     udp.close()
 
 def join_server(ip: str, nom_joueur: str):
+    """
+    Connecte le client au serveur TCP à l'adresse donnée et envoie le nom du joueur.
+
+    :param ip: Adresse IP du serveur (str).
+    :param nom_joueur: Nom du joueur à envoyer au serveur (str).
+    """
     global client_socket
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((ip, PORT))
@@ -331,6 +466,7 @@ def join_server(ip: str, nom_joueur: str):
 # ========================
 class Jeu:
     def __init__(self):
+        """Initialise le jeu : listes de joueurs et de rôles, état courant, boutons, champs de saisie et configuration."""
         self.joueurs           = []
         self.roles_disponibles = [
             LoupGarou(), Villageois(), Voyante(), Sorciere(), Chasseur()
@@ -375,6 +511,7 @@ class Jeu:
 
     # ── Rôles ───────────────────────────────────────────
     def ajouter_role_custom(self):
+        """Crée un rôle personnalisé depuis les champs de saisie et l'ajoute à la liste des rôles disponibles, puis sauvegarde."""
         nom  = self.champ_nom_role.texte.strip()
         desc = self.champ_desc_role.texte.strip()
         pvr  = self.champ_pvr_role.texte.strip().lower() or "aucun"
@@ -391,12 +528,14 @@ class Jeu:
         self.message = f"✔ Rôle « {nom} » ajouté !"
 
     def sauvegarder_roles(self):
+        """Sauvegarde tous les rôles disponibles dans le fichier roles.json."""
         data = [{"nom": r.nom, "description": r.description, "pouvoir": r.pouvoir}
                 for r in self.roles_disponibles]
         with open("roles.json", "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
 
     def charger_roles(self):
+        """Charge les rôles personnalisés depuis roles.json et les ajoute aux rôles disponibles s'ils ne sont pas déjà présents."""
         try:
             with open("roles.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -413,6 +552,11 @@ class Jeu:
 
     # ── Navigation ──────────────────────────────────────
     def changer_etat(self, etat):
+        """
+        Change l'état courant du jeu et initialise l'écran correspondant.
+
+        :param etat: Nom de l'état cible (str), ex : 'menu_principal', 'partie', 'voir_roles'.
+        """
         self.etat    = etat
         self.message = ""
         self.champs  = []
@@ -428,17 +572,39 @@ class Jeu:
         elif etat == "partie":           self._set_partie()
 
     def _btn(self, x, y, w, h, txt, cible=None, fn=None, icon="", color=BG_PANEL, hover=ACCENT_BLUE):
+        """
+        Crée et retourne un Bouton positionné à (x, y).
+
+        :param x: Position horizontale (int).
+        :param y: Position verticale (int).
+        :param w: Largeur du bouton en pixels (int).
+        :param h: Hauteur du bouton en pixels (int).
+        :param txt: Texte affiché sur le bouton (str).
+        :param cible: Nom de l'état cible pour la navigation (str ou None).
+        :param fn: Fonction à appeler au clic ; si None, navigue vers cible (callable ou None).
+        :param icon: Icône Unicode affichée avant le texte (str).
+        :param color: Couleur de fond RGB (tuple).
+        :param hover: Couleur de survol RGB (tuple).
+        :return: Bouton
+        """
         if fn is None and cible is not None:
             fn = lambda c=cible: self.changer_etat(c)
         return Bouton(x, y, w, h, txt, couleur=color, hover=hover,
                       fonction=fn, icon=icon)
 
     def _btn_retour(self, cible="menu_principal"):
+        """
+        Crée et retourne un bouton « Retour » fixe en bas à gauche.
+
+        :param cible: Nom de l'état vers lequel revenir (str), 'menu_principal' par défaut.
+        :return: Bouton
+        """
         return self._btn(30, HEIGHT - 70, 160, 44, "← Retour", cible,
                          color=GRAY_DARK, hover=(100, 80, 130))
 
     # ── Menus ────────────────────────────────────────────
     def _set_menu_reseau(self):
+        """Initialise les boutons du menu réseau (créer / rejoindre / quitter)."""
         cx = WIDTH // 2 - 175
         self.boutons = [
             self._btn(cx, 220, 350, 60, "Créer un serveur", "creer_serveur",
@@ -451,6 +617,7 @@ class Jeu:
         ]
 
     def _set_creer_serveur(self):
+        """Initialise l'écran de création de serveur : champ de saisie du nom de partie et bouton de lancement."""
         self.champs = [self.champ_partie]
         self.champ_partie.texte = ""
 
@@ -468,6 +635,7 @@ class Jeu:
         ]
 
     def _set_rejoindre(self):
+        """Initialise l'écran de connexion à un serveur : champ IP et boutons scanner / connexion manuelle."""
         self.champs = [self.champ_ip]
         self.champ_ip.texte = ""
 
@@ -494,6 +662,7 @@ class Jeu:
         ]
 
     def _set_scan(self):
+        """Lance un scan UDP du réseau local dans un thread séparé et prépare l'écran de résultats."""
         self.message = "🔍 Scan du réseau local..."
         self.boutons = [self._btn_retour("rejoindre")]
 
@@ -504,6 +673,7 @@ class Jeu:
         threading.Thread(target=do_scan, daemon=True).start()
 
     def _refresh_scan_buttons(self):
+        """Met à jour la liste de boutons avec les parties trouvées lors du dernier scan réseau."""
         self.boutons = [self._btn_retour("rejoindre")]
         if not parties_trouvees:
             self.message = "❌ Aucune partie trouvée."
@@ -526,6 +696,7 @@ class Jeu:
             )
 
     def _set_menu_principal(self):
+        """Initialise les boutons du menu principal (ajouter joueur, voir rôles, lancer partie, etc.)."""
         cx = WIDTH // 2 - 175
         self.boutons = [
             self._btn(cx, 155, 350, 52, "Ajouter un joueur", "ajouter_joueur", icon="👤"),
@@ -541,6 +712,7 @@ class Jeu:
         ]
 
     def _set_ajouter_joueur(self):
+        """Initialise l'écran d'ajout de joueur : champ de saisie du nom et bouton de confirmation."""
         self.champs = [self.champ_joueur]
         self.champ_joueur.texte = ""
 
@@ -624,10 +796,12 @@ class Jeu:
                 )
 
     def _set_voir_roles(self):
+        """Initialise l'écran de visualisation des rôles : remet le scroll à zéro et affiche le bouton retour."""
         self.scroll_roles = 0
         self.boutons = [self._btn_retour()]
 
     def _set_ajouter_role(self):
+        """Initialise l'écran de création de rôle personnalisé : champs nom/description/pouvoir et bouton d'ajout."""
         self.champs = [self.champ_nom_role, self.champ_desc_role, self.champ_pvr_role]
 
         self.boutons = [
@@ -638,6 +812,7 @@ class Jeu:
         ]
 
     def _set_partie(self):
+        """Démarre la partie si le nombre de joueurs est suffisant, distribue les rôles et affiche le bouton de fin."""
         if len(self.joueurs) < 3:
             self.message = "⚠ Minimum 3 joueurs requis !"
             self.changer_etat("menu_principal")
@@ -650,6 +825,7 @@ class Jeu:
         ]
 
     def _distribuer_roles(self):
+        """Attribue aléatoirement un rôle à chaque joueur selon la configuration active, en complétant avec des Villageois si besoin."""
         nb   = len(self.joueurs)
         pile = []
 
@@ -681,6 +857,7 @@ class Jeu:
 
     # ── Affichage ───────────────────────────────────────
     def draw(self):
+        """Dessine l'écran complet : fond, écran d'état courant, boutons, champs de saisie et message d'information."""
         draw_bg(WIN)
 
         if self.etat == "menu_reseau":
@@ -720,25 +897,30 @@ class Jeu:
         pygame.display.update()
 
     def _draw_menu_reseau(self):
+        """Affiche le titre et le sous-titre du menu réseau."""
         draw_title(WIN, "🐺  LOUP-GAROU  🐺", 70, ACCENT_RED)
         draw_subtitle(WIN, "Woolfy Style — Multijoueur réseau", 130, GRAY_LIGHT)
 
     def _draw_creer_serveur(self):
+        """Affiche l'écran de création de serveur avec le titre et le panneau de saisie du nom de partie."""
         draw_title(WIN, "Créer un serveur", 60)
         draw_panel(WIN, 150, 220, 700, 160)
         lbl = MED_FONT.render("Nom de la partie :", True, GRAY_LIGHT)
         WIN.blit(lbl, (200, 240))
 
     def _draw_rejoindre(self):
+        """Affiche l'écran de connexion avec le titre et le panneau de saisie de l'adresse IP."""
         draw_title(WIN, "Rejoindre une partie", 60)
         draw_panel(WIN, 150, 200, 700, 180)
         lbl = MED_FONT.render("IP du serveur (ou scanner) :", True, GRAY_LIGHT)
         WIN.blit(lbl, (200, 245))
 
     def _draw_scan(self):
+        """Affiche le titre de l'écran de scan réseau."""
         draw_title(WIN, "Scan du réseau local 📡", 60)
 
     def _draw_menu_principal(self):
+        """Affiche le menu principal avec le titre et le panneau latéral listant les joueurs inscrits."""
         draw_title(WIN, "Menu Principal", 70)
         # Joueurs
         draw_panel(WIN, 680, 140, 290, HEIGHT - 200)
@@ -749,6 +931,7 @@ class Jeu:
             WIN.blit(s, (700, 195 + i * 24))
 
     def _draw_ajouter_joueur(self):
+        """Affiche l'écran d'ajout de joueur avec le champ de saisie et la liste des joueurs déjà enregistrés."""
         draw_title(WIN, "Ajouter un joueur", 70)
         draw_panel(WIN, 150, 240, 700, 120)
         lbl = MED_FONT.render("Nom du joueur :", True, GRAY_LIGHT)
@@ -762,6 +945,7 @@ class Jeu:
             WIN.blit(s, (165, 455 + i * 19))
 
     def _draw_voir_roles(self):
+        """Affiche toutes les cartes de rôles disponibles en grille avec scroll vertical."""
         draw_title(WIN, "Rôles disponibles", 20)
         # Cartes
         cols, card_w, card_h = 3, 290, 130
@@ -782,6 +966,7 @@ class Jeu:
                       role.nom, role.description, col, role.pouvoir)
 
     def _draw_ajouter_role(self):
+        """Affiche l'écran de création de rôle avec les labels et les panneaux pour chaque champ de saisie."""
         draw_title(WIN, "Créer un nouveau rôle", 50)
         draw_panel(WIN, 150, 200, 700, 270)
 
@@ -795,6 +980,7 @@ class Jeu:
             WIN.blit(s, (x, y))
 
     def _draw_config_roles(self):
+        """Affiche l'écran de configuration des rôles avec les lignes actif/inactif, les quantités et le total."""
         draw_title(WIN, "⚙  Configuration des rôles", 20, ACCENT_GOLD)
 
         COLORS = [ACCENT_RED, (60, 120, 180), (140, 60, 180),
@@ -847,6 +1033,7 @@ class Jeu:
             WIN.blit(hs, (WIDTH // 2 - hs.get_width() // 2, 100))
 
     def _draw_partie(self):
+        """Affiche la vue de partie : joueurs disposés en cercle avec leurs initiales, rôles (hôte uniquement) et légende."""
         draw_title(WIN, "☀️  Partie en cours  🌙", 20)
         draw_subtitle(WIN, f"{len(self.joueurs)} joueurs — Phase de discussion", 80, GRAY_LIGHT)
 

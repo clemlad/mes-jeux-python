@@ -44,6 +44,12 @@ _STARS_SIZE = (0, 0)
 
 
 def _init_stars(w, h):
+    """
+    Initialise (ou réinitialise) le tableau d'étoiles si la taille de la fenêtre a changé.
+
+    :param w: Largeur de la fenêtre en pixels (int).
+    :param h: Hauteur de la fenêtre en pixels (int).
+    """
     # Recalcule les étoiles uniquement si la taille de la fenêtre a changé
     global _STARS, _STARS_SIZE
     if _STARS is None or _STARS_SIZE != (w, h):
@@ -54,6 +60,12 @@ def _init_stars(w, h):
 
 
 def draw_forest_scene(surface: pygame.Surface, t: float):
+    """
+    Dessine la scène de fond forestière animée : ciel dégradé, étoiles scintillantes, lune, brume et silhouettes d'arbres.
+
+    :param surface: Surface Pygame sur laquelle dessiner (pygame.Surface).
+    :param t: Temps écoulé en secondes (float), utilisé pour animer les éléments.
+    """
     w, h = surface.get_size()
     draw_gradient_bg(surface, BG_DEEP, BG_BOTTOM)
     _init_stars(w, h)
@@ -87,6 +99,7 @@ def draw_forest_scene(surface: pygame.Surface, t: float):
 
 class Launcher:
     def __init__(self):
+        """Initialise Pygame, la fenêtre redimensionnable, tous les boutons/champs/steppers, et démarre la découverte réseau."""
         pygame.init()
         self.screen = pygame.display.set_mode((BASE_W, BASE_H), pygame.RESIZABLE)
         pygame.display.set_caption("Loup-Garou")
@@ -117,19 +130,35 @@ class Launcher:
     # ── Utilitaires ──────────────────────────────────────────────────────────
 
     def fonts(self) -> dict:
+        """
+        Retourne le dictionnaire de polices mises à l'échelle selon la taille courante de la fenêtre.
+
+        :return: dict — clés 'title', 'big', 'medium', 'small', 'xs' avec des objets pygame.font.Font.
+        """
         w, h = self.screen.get_size()
         return scaled_fonts(w, h, BASE_W, BASE_H)
 
     def valid_name(self) -> str:
+        """
+        Retourne le pseudonyme saisi, nettoyé et tronqué à 20 caractères.
+
+        :return: str
+        """
         return self.input_name.text.strip()[:20]
 
     def ensure_name(self) -> bool:
+        """
+        Vérifie qu'un pseudonyme a été saisi ; affiche un message d'erreur si ce n'est pas le cas.
+
+        :return: True si le pseudonyme est valide (bool).
+        """
         if not self.valid_name():
             self.message = "⚠  Choisis un pseudonyme avant de continuer."
             return False
         return True
 
     def reset_state(self):
+        """Revient à l'état principal et remet à zéro la sélection et le message d'information."""
         self.state = "main"
         self.selected_idx = 0
         self.row_rects = []
@@ -153,6 +182,12 @@ class Launcher:
     # ── Lancements ───────────────────────────────────────────────────────────
 
     def launch_online_game(self, host: str, shutdown_after: bool = False):
+        """
+        Lance le jeu en ligne, restaure la fenêtre après la fin et arrête le serveur si demandé.
+
+        :param host: Adresse IP du serveur à rejoindre (str).
+        :param shutdown_after: Si True, arrête le serveur hébergé après la partie (bool).
+        """
         sz = self.screen.get_size()
         error_msg = ""
         try:
@@ -173,6 +208,7 @@ class Launcher:
             self.message = error_msg
 
     def launch_solo_game(self):
+        """Lance une partie solo contre des IA avec le nombre de joueurs choisi, puis restaure la fenêtre."""
         sz = self.screen.get_size()
         error_msg = ""
         try:
@@ -217,6 +253,7 @@ class Launcher:
         self.launch_online_game("127.0.0.1", shutdown_after=True)
 
     def join_selected(self):
+        """Rejoint le serveur actuellement sélectionné dans la liste de découverte."""
         servers = self.discovery.get_servers()
         if not servers:
             self.message = "Aucun salon trouvé sur le réseau local."
@@ -228,10 +265,22 @@ class Launcher:
     # ── Layout ───────────────────────────────────────────────────────────────
 
     def _center_panel(self, pw: int = 600, ph: int = 500) -> pygame.Rect:
+        """
+        Retourne un rectangle centré dans la fenêtre avec les dimensions données.
+
+        :param pw: Largeur du panneau en pixels (int).
+        :param ph: Hauteur du panneau en pixels (int).
+        :return: pygame.Rect centré dans la fenêtre courante.
+        """
         w, h = self.screen.get_size()
         return pygame.Rect(w // 2 - pw // 2, h // 2 - ph // 2, pw, ph)
 
     def layout_main(self) -> pygame.Rect:
+        """
+        Positionne les widgets du menu principal et retourne le rectangle du panneau.
+
+        :return: pygame.Rect du panneau principal.
+        """
         p = self._center_panel(580, 480)
         bw, bh = p.width - 100, 54
         bx = p.x + 50
@@ -242,6 +291,11 @@ class Launcher:
         return p
 
     def layout_online(self) -> pygame.Rect:
+        """
+        Positionne les widgets du menu en ligne et retourne le rectangle du panneau.
+
+        :return: pygame.Rect du panneau en ligne.
+        """
         p = self._center_panel(580, 390)
         bw, bh = p.width - 100, 56
         bx = p.x + 50
@@ -251,6 +305,11 @@ class Launcher:
         return p
 
     def layout_solo(self) -> pygame.Rect:
+        """
+        Positionne les widgets du menu solo et retourne le rectangle du panneau.
+
+        :return: pygame.Rect du panneau solo.
+        """
         p = self._center_panel(580, 460)
         bw = p.width - 100
         bx = p.x + 50
@@ -260,6 +319,11 @@ class Launcher:
         return p
 
     def layout_join(self) -> pygame.Rect:
+        """
+        Positionne les widgets de l'écran de liste des salons et retourne le rectangle du panneau.
+
+        :return: pygame.Rect occupant presque toute la fenêtre.
+        """
         w, h = self.screen.get_size()
         p = pygame.Rect(60, 50, w - 120, h - 120)
         self.btn_back.set_rect((p.x, p.bottom + 10, 180, 42))
@@ -268,6 +332,12 @@ class Launcher:
     # ── Dessin ───────────────────────────────────────────────────────────────
 
     def _logo(self, panel: pygame.Rect, f: dict):
+        """
+        Dessine le logo « LOUP-GAROU » avec ses lignes décoratives dans le panneau donné.
+
+        :param panel: Rectangle du panneau dans lequel centrer le logo (pygame.Rect).
+        :param f: Dictionnaire de polices retourné par fonts() (dict).
+        """
         cx = panel.centerx
         lw = panel.width // 3
         pygame.draw.line(self.screen, GOLD_WARM,
@@ -278,6 +348,7 @@ class Launcher:
                          (cx - lw // 2, panel.y + 108), (cx + lw // 2, panel.y + 108), 1)
 
     def draw_main(self):
+        """Dessine le menu principal : panneau vitré, logo, champ de pseudonyme et boutons solo/en ligne/quitter."""
         f = self.fonts()
         p = self.layout_main()
         draw_glass_panel(self.screen, p, radius=24)
@@ -294,6 +365,7 @@ class Launcher:
                       center=(p.centerx, p.bottom + 28))
 
     def draw_online(self):
+        """Dessine le menu en ligne : panneau vitré, titre et boutons créer/rejoindre/retour."""
         f = self.fonts()
         p = self.layout_online()
         draw_glass_panel(self.screen, p, radius=24)
@@ -312,6 +384,7 @@ class Launcher:
         self.btn_back.draw  (self.screen, f["medium"], mouse)
 
     def draw_solo(self):
+        """Dessine le menu solo : panneau vitré, titre, stepper de joueurs et boutons lancer/retour."""
         f = self.fonts()
         p = self.layout_solo()
         draw_glass_panel(self.screen, p, radius=24)
@@ -330,6 +403,7 @@ class Launcher:
         self.btn_back.draw  (self.screen, f["medium"], mouse)
 
     def draw_join(self):
+        """Dessine l'écran de liste des salons : panneau vitré, lignes de serveurs cliquables et bouton retour."""
         f = self.fonts()
         p = self.layout_join()
         draw_glass_panel(self.screen, p, radius=22)
@@ -379,6 +453,11 @@ class Launcher:
     # ── Événements ───────────────────────────────────────────────────────────
 
     def handle_main(self, event):
+        """
+        Traite les événements du menu principal : saisie du pseudonyme et clics sur les boutons.
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         self.input_name.handle_event(event)
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.btn_solo.is_clicked(event.pos):
@@ -391,6 +470,11 @@ class Launcher:
                 self.running = False
 
     def handle_online(self, event):
+        """
+        Traite les événements du menu en ligne : clics sur créer/rejoindre/retour.
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.btn_create.is_clicked(event.pos):
                 if self.ensure_name():
@@ -403,6 +487,11 @@ class Launcher:
                 self.reset_state()
 
     def handle_solo(self, event):
+        """
+        Traite les événements du menu solo : clics sur le stepper, lancer et retour.
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         if event.type == pygame.MOUSEBUTTONDOWN:
             self.stepper.handle_click(event.pos)
             if self.btn_launch.is_clicked(event.pos):
@@ -411,6 +500,11 @@ class Launcher:
                 self.reset_state()
 
     def handle_join(self, event):
+        """
+        Traite les événements de l'écran de liste des salons : clic sur une ligne, navigation clavier et retour.
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         servers = self.discovery.get_servers()
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.btn_back.is_clicked(event.pos):
@@ -434,6 +528,7 @@ class Launcher:
     # ── Boucle principale ────────────────────────────────────────────────────
 
     def run(self):
+        """Lance la boucle principale du lanceur : animation, événements et rendu des différents états."""
         while self.running:
             dt = self.clock.tick(60)
             self.t += dt * 0.001

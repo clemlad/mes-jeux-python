@@ -37,6 +37,13 @@ class ServerBroadcaster:
     """Diffuse périodiquement une annonce UDP pour rendre le serveur visible sur le réseau."""
 
     def __init__(self, server_name, host_ip=None, game_port=GAME_PORT):
+        """
+        Initialise le broadcaster avec le nom du serveur et les paramètres réseau.
+
+        :param server_name: Nom du salon à diffuser (str).
+        :param host_ip: Adresse IP locale du serveur (str ou None pour autodétection).
+        :param game_port: Port TCP du jeu (int), 5555 par défaut.
+        """
         self.server_name  = server_name
         self.host_ip      = host_ip or get_local_ip()
         self.game_port    = game_port
@@ -47,15 +54,27 @@ class ServerBroadcaster:
         self.role_summary = "1 loup(s), voyante, sorcière"
 
     def set_player_count(self, count):
+        """
+        Met à jour le nombre de joueurs connectés diffusé dans les annonces.
+
+        :param count: Nombre actuel de joueurs connectés (int).
+        """
         self.player_count = count
 
     def set_room_config(self, max_players=None, role_summary=None):
+        """
+        Met à jour la configuration du salon diffusée dans les annonces.
+
+        :param max_players: Nombre maximum de joueurs du salon (int ou None pour ne pas modifier).
+        :param role_summary: Résumé textuel des rôles configurés (str ou None pour ne pas modifier).
+        """
         if max_players is not None:
             self.max_players = max_players
         if role_summary is not None:
             self.role_summary = role_summary
 
     def start(self):
+        """Démarre le thread de diffusion UDP si ce n'est pas déjà fait."""
         if self.running:
             return
         self.running = True
@@ -63,6 +82,7 @@ class ServerBroadcaster:
         self.thread.start()
 
     def stop(self):
+        """Arrête le thread de diffusion UDP."""
         self.running = False
 
     def _run(self):
@@ -96,12 +116,14 @@ class ServerDiscovery:
     """Écoute les annonces UDP et maintient une liste à jour des serveurs actifs."""
 
     def __init__(self):
+        """Initialise le listener UDP : liste des serveurs vide et verrou thread-safe."""
         self.running        = False
         self.thread         = None
         self.lock           = threading.Lock()
         self.found_servers  = {}   # clé : (host, port)
 
     def start(self):
+        """Démarre le thread d'écoute UDP si ce n'est pas déjà fait."""
         if self.running:
             return
         self.running = True
@@ -109,6 +131,7 @@ class ServerDiscovery:
         self.thread.start()
 
     def stop(self):
+        """Arrête le thread d'écoute UDP."""
         self.running = False
 
     def _listen(self):

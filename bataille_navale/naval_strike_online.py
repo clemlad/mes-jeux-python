@@ -44,6 +44,13 @@ BUTTON_BORDER = (180, 205, 230)
 
 class NetworkClient:
     def __init__(self, host, player_name, port=5555):
+        """
+        Ouvre une connexion TCP vers le serveur et démarre le thread de réception.
+
+        :param host: Adresse IP ou nom d'hôte du serveur (str).
+        :param player_name: Nom du joueur local envoyé au serveur (str).
+        :param port: Port TCP du serveur (int), 5555 par défaut.
+        """
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(8)
         self.sock.connect((host, port))
@@ -55,6 +62,7 @@ class NetworkClient:
         self.send({"type": "join", "name": player_name})
 
     def listen(self):
+        """Boucle de réception TCP : accumule les données et décode chaque ligne JSON dans messages."""
         buffer = ""
         try:
             while self.running:
@@ -73,18 +81,28 @@ class NetworkClient:
             self.running = False
 
     def send(self, payload):
+        """
+        Sérialise et envoie un message JSON au serveur via TCP.
+
+        :param payload: Dictionnaire à envoyer (dict).
+        """
         try:
             self.sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         except OSError:
             self.running = False
 
     def pop_messages(self):
+        """Vide et retourne la liste des messages reçus depuis le dernier appel.
+
+        :return: Liste de dictionnaires JSON reçus (list[dict]).
+        """
         with self.lock:
             messages = self.messages[:]
             self.messages.clear()
         return messages
 
     def close(self):
+        """Stoppe le thread de réception et ferme le socket TCP."""
         self.running = False
         try:
             self.sock.close()
@@ -94,6 +112,13 @@ class NetworkClient:
 
 class Button:
     def __init__(self, text, color, hover):
+        """
+        Crée un bouton avec un texte, une couleur normale et une couleur de survol.
+
+        :param text: Libellé affiché sur le bouton (str).
+        :param color: Couleur de fond normale (tuple RGB).
+        :param hover: Couleur de fond au survol (tuple RGB).
+        """
         self.text = text
         self.color = color
         self.hover = hover
@@ -101,9 +126,22 @@ class Button:
         self.enabled = True
 
     def set_rect(self, rect):
+        """
+        Définit la zone de rendu du bouton.
+
+        :param rect: Tuple (x, y, largeur, hauteur) ou pygame.Rect (tuple | pygame.Rect).
+        """
         self.rect = pygame.Rect(rect)
 
     def draw(self, surface, font, mouse_pos, enabled=None):
+        """
+        Dessine le bouton sur la surface avec gestion du survol et de l'état désactivé.
+
+        :param surface: Surface Pygame cible (pygame.Surface).
+        :param font: Police de rendu du texte (pygame.font.Font).
+        :param mouse_pos: Position actuelle du curseur (tuple[int, int]).
+        :param enabled: Active ou désactive le bouton si fourni (bool | None).
+        """
         if enabled is not None:
             self.enabled = enabled
         base_color = self.color if self.enabled else (70, 80, 96)
@@ -117,10 +155,23 @@ class Button:
         surface.blit(img, img.get_rect(center=self.rect.center))
 
     def is_clicked(self, pos):
+        """
+        Indique si la position donnée est dans la zone du bouton et que celui-ci est actif.
+
+        :param pos: Coordonnées (x, y) du clic (tuple[int, int]).
+        :return: True si le bouton est cliqué et actif (bool).
+        """
         return self.enabled and self.rect.collidepoint(pos)
 
 
 def draw_vertical_gradient(surface, top_color, bottom_color):
+    """
+    Dessine un dégradé vertical ligne par ligne du haut vers le bas.
+
+    :param surface: Surface Pygame à remplir (pygame.Surface).
+    :param top_color: Couleur en haut (tuple RGB).
+    :param bottom_color: Couleur en bas (tuple RGB).
+    """
     width, height = surface.get_size()
     for y in range(height):
         ratio = y / max(1, height)
@@ -129,6 +180,11 @@ def draw_vertical_gradient(surface, top_color, bottom_color):
 
 
 def draw_ocean_overlay(surface):
+    """
+    Superpose une grille translucide imitant les reflets océaniques sur la surface.
+
+    :param surface: Surface Pygame cible (pygame.Surface).
+    """
     width, height = surface.get_size()
     step_y = max(36, height // 16)
     step_x = max(52, width // 16)
@@ -139,6 +195,13 @@ def draw_ocean_overlay(surface):
 
 
 def draw_glass_panel(surface, rect, radius=18):
+    """
+    Dessine un panneau translucide avec bordure arrondie (effet verre).
+
+    :param surface: Surface Pygame cible (pygame.Surface).
+    :param rect: Zone du panneau (pygame.Rect).
+    :param radius: Rayon des coins arrondis en pixels (int), 18 par défaut.
+    """
     panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
     pygame.draw.rect(panel, PANEL_FILL, (0, 0, rect.width, rect.height), border_radius=radius)
     pygame.draw.rect(panel, PANEL_BORDER, (0, 0, rect.width, rect.height), width=1, border_radius=radius)
@@ -146,6 +209,17 @@ def draw_glass_panel(surface, rect, radius=18):
 
 
 def draw_text(surface, text, font, color, center=None, topleft=None):
+    """
+    Rend un texte sur la surface, positionné par centre ou coin supérieur gauche.
+
+    :param surface: Surface Pygame cible (pygame.Surface).
+    :param text: Texte à afficher (str).
+    :param font: Police de rendu (pygame.font.Font).
+    :param color: Couleur du texte (tuple RGB).
+    :param center: Coordonnées du centre (tuple[int, int] | None).
+    :param topleft: Coordonnées du coin supérieur gauche (tuple[int, int] | None).
+    :return: Rect occupé par le texte (pygame.Rect).
+    """
     img = font.render(text, True, color)
     rect = img.get_rect()
     if center is not None:
@@ -157,6 +231,16 @@ def draw_text(surface, text, font, color, center=None, topleft=None):
 
 
 def draw_wrapped_text(surface, text, font, color, rect, line_spacing=8):
+    """
+    Affiche un texte avec retour à la ligne automatique dans le rectangle fourni.
+
+    :param surface: Surface Pygame cible (pygame.Surface).
+    :param text: Texte à afficher (str).
+    :param font: Police de rendu (pygame.font.Font).
+    :param color: Couleur du texte (tuple RGB).
+    :param rect: Zone de contrainte pour le retour à la ligne (pygame.Rect).
+    :param line_spacing: Espace supplémentaire entre les lignes en pixels (int), 8 par défaut.
+    """
     words = text.split()
     lines = []
     current = ""
@@ -178,11 +262,23 @@ def draw_wrapped_text(surface, text, font, color, rect, line_spacing=8):
 
 
 def ship_label(name):
+    """
+    Retourne le libellé d'affichage d'un bateau (masque le suffixe T du sous-marin).
+
+    :param name: Nom interne du bateau (str).
+    :return: Nom à afficher à l'écran (str).
+    """
     return "Sous-marin" if name == "Sous-marin T" else name
 
 
 class NavalStrikeOnlineGame:
     def __init__(self, host, player_name):
+        """
+        Initialise le jeu Naval Strike en ligne : Pygame, réseau, état et mise en page.
+
+        :param host: Adresse IP du serveur à rejoindre (str).
+        :param player_name: Nom du joueur local (str).
+        """
         pygame.init()
         self.screen = pygame.display.set_mode((BASE_W, BASE_H), pygame.RESIZABLE)
         pygame.display.set_caption("Naval Strike Online")
@@ -210,6 +306,10 @@ class NavalStrikeOnlineGame:
         self.compute_layout()
 
     def fonts(self):
+        """Retourne un dictionnaire de polices mises à l'échelle selon la taille de la fenêtre.
+
+        :return: Dictionnaire nom → pygame.font.Font (dict).
+        """
         w, h = self.screen.get_size()
         scale = min(w / BASE_W, h / BASE_H)
         return {
@@ -223,6 +323,7 @@ class NavalStrikeOnlineGame:
         }
 
     def compute_layout(self):
+        """Recalcule toutes les positions et tailles des éléments visuels selon la taille courante de la fenêtre."""
         w, h = self.screen.get_size()
         self.top_bar_h = max(92, int(h * 0.12))
         self.message_h = max(38, int(h * 0.05))
@@ -259,9 +360,27 @@ class NavalStrikeOnlineGame:
         self.rematch_btn.set_rect((w // 2 - rematch_w // 2, h // 2 + 10, rematch_w, rematch_h))
 
     def board_to_pixel(self, board_x, board_y, row, col):
+        """
+        Convertit des coordonnées de grille en pixels sur l'écran.
+
+        :param board_x: Coordonnée x d'origine de la grille en pixels (int).
+        :param board_y: Coordonnée y d'origine de la grille en pixels (int).
+        :param row: Ligne dans la grille (int).
+        :param col: Colonne dans la grille (int).
+        :return: Tuple (x_pixel, y_pixel) (tuple[int, int]).
+        """
         return board_x + col * self.cell_size, board_y + row * self.cell_size
 
     def pixel_to_board(self, mouse_x, mouse_y, board_x, board_y):
+        """
+        Convertit des coordonnées souris en case de grille, ou None si hors grille.
+
+        :param mouse_x: Coordonnée x de la souris (int).
+        :param mouse_y: Coordonnée y de la souris (int).
+        :param board_x: Coordonnée x d'origine de la grille (int).
+        :param board_y: Coordonnée y d'origine de la grille (int).
+        :return: Tuple (ligne, colonne) ou None (tuple[int, int] | None).
+        """
         rel_x = mouse_x - board_x
         rel_y = mouse_y - board_y
         if rel_x < 0 or rel_y < 0:
@@ -273,9 +392,18 @@ class NavalStrikeOnlineGame:
         return None
 
     def placed_ship_names(self):
+        """Retourne l'ensemble des noms de bateaux déjà placés sur le plateau local.
+
+        :return: Ensemble de noms (set[str]).
+        """
         return {ship.name for ship in self.player_board.ships}
 
     def current_ship_config(self):
+        """
+        Retourne la configuration (nom, taille) du prochain bateau à placer, ou None si tous sont placés.
+
+        :return: Tuple (nom, taille) ou None (tuple[str, int] | None).
+        """
         target_name = self.selected_ship_name
         if target_name is None:
             placed = self.placed_ship_names()
@@ -291,6 +419,11 @@ class NavalStrikeOnlineGame:
         return None
 
     def set_orientation_from_ship(self, ship):
+        """
+        Déduit et applique l'orientation courante à partir des positions d'un bateau existant.
+
+        :param ship: Bateau dont on veut retrouver l'orientation (Ship).
+        """
         if ship.name == "Sous-marin T":
             positions = set(ship.positions)
             for row, col in positions:
@@ -312,6 +445,7 @@ class NavalStrikeOnlineGame:
             self.current_orientation = "H" if len(rows) == 1 else "V"
 
     def process_network(self):
+        """Traite tous les messages réseau reçus depuis le dernier appel et met à jour l'état du jeu."""
         for msg in self.network.pop_messages():
             msg_type = msg.get("type")
             names = msg.get("player_names")
@@ -382,6 +516,12 @@ class NavalStrikeOnlineGame:
                 self.message = "Erreur : " + msg.get("message", "")
 
     def place_current_ship(self, row, col):
+        """
+        Tente de placer le bateau courant à la case (row, col) avec l'orientation sélectionnée.
+
+        :param row: Ligne cible dans la grille (int).
+        :param col: Colonne cible dans la grille (int).
+        """
         current = self.current_ship_config()
         if current is None:
             return
@@ -402,6 +542,13 @@ class NavalStrikeOnlineGame:
             self.message = "Placement invalide."
 
     def pick_ship_to_move(self, row, col):
+        """
+        Retire le bateau occupant la case (row, col) pour permettre son déplacement.
+
+        :param row: Ligne de la case cliquée (int).
+        :param col: Colonne de la case cliquée (int).
+        :return: True si un bateau a été sélectionné, False sinon (bool).
+        """
         ship = self.player_board.remove_ship_at(row, col)
         if ship is None:
             return False
@@ -411,6 +558,7 @@ class NavalStrikeOnlineGame:
         return True
 
     def send_layout(self):
+        """Envoie la disposition complète des bateaux au serveur et verrouille la phase de placement."""
         if self.placement_locked:
             self.message = "Placement déjà validé."
             return
@@ -425,14 +573,22 @@ class NavalStrikeOnlineGame:
         self.message = "En attente de l'autre joueur..."
 
     def auto_place(self):
+        """Génère automatiquement un placement aléatoire valide pour tous les bateaux."""
         self.player_board.auto_place_all()
         self.selected_ship_name = None
         self.message = "Placement auto généré. Tu peux déplacer n'importe quel bateau avant validation."
 
     def shoot(self, row, col):
+        """
+        Envoie un tir sur la case (row, col) de la grille adverse au serveur.
+
+        :param row: Ligne ciblée (int).
+        :param col: Colonne ciblée (int).
+        """
         self.network.send({"type": "shoot", "row": row, "col": col})
 
     def request_rematch(self):
+        """Envoie une proposition de revanche au serveur si le joueur ne l'a pas déjà demandée."""
         if self.player_id in self.rematch_requests:
             return
         self.network.send({"type": "rematch_request"})
@@ -440,6 +596,12 @@ class NavalStrikeOnlineGame:
         self.message = "Proposition de revanche envoyée."
 
     def get_status_rows(self, board):
+        """
+        Construit la liste des statuts (nom, état, couleur) de chaque bateau d'un plateau.
+
+        :param board: Plateau à analyser (Board).
+        :return: Liste de tuples (nom_affichage, statut, couleur) (list[tuple]).
+        """
         rows = []
         ships_by_name = {ship.name: ship for ship in board.ships}
         for ship_name, _ in SHIPS_CONFIG:
@@ -450,6 +612,13 @@ class NavalStrikeOnlineGame:
         return rows
 
     def draw_status_panel(self, rect, title, board):
+        """
+        Dessine le panneau d'état des bateaux (coulés / intacts) pour un plateau donné.
+
+        :param rect: Zone du panneau (pygame.Rect).
+        :param title: Titre affiché en haut du panneau (str).
+        :param board: Plateau dont on affiche l'état (Board).
+        """
         f = self.fonts()
         draw_glass_panel(self.screen, rect, radius=22)
         draw_text(self.screen, title, f["panel_title"], WHITE, topleft=(rect.x + 18, rect.y + 12))
@@ -469,6 +638,14 @@ class NavalStrikeOnlineGame:
             y += row_h
 
     def draw_board(self, board, x, y, reveal_ships=False):
+        """
+        Dessine une grille de jeu avec les tirs, les bateaux coulés et optionnellement les bateaux intacts.
+
+        :param board: Plateau à dessiner (Board).
+        :param x: Coordonnée x d'origine de la grille en pixels (int).
+        :param y: Coordonnée y d'origine de la grille en pixels (int).
+        :param reveal_ships: Si True, affiche les bateaux non coulés (bool), False par défaut.
+        """
         label_font = self.fonts()["small"]
         grid_rect = pygame.Rect(x - 8, y - 8, self.board_px + 16, self.board_px + 16)
         pygame.draw.rect(self.screen, NAVY, grid_rect, border_radius=14)
@@ -522,6 +699,7 @@ class NavalStrikeOnlineGame:
                     pygame.draw.rect(self.screen, SUNK_BORDER, sunk_rect, 2, border_radius=max(6, self.cell_size // 6))
 
     def draw_ship_preview(self):
+        """Affiche l'aperçu semi-transparent du bateau courant sous le curseur lors du placement."""
         if self.hover_cell is None:
             return
         current = self.current_ship_config()
@@ -541,6 +719,11 @@ class NavalStrikeOnlineGame:
             pygame.draw.rect(self.screen, BLACK, rect, 1, border_radius=max(6, self.cell_size // 6))
 
     def draw_title_bar(self, subtitle):
+        """
+        Dessine la barre de titre en haut de l'écran avec le sous-titre et le bouton de synchro.
+
+        :param subtitle: Texte de sous-titre contextuel (str).
+        """
         f = self.fonts()
         w, _ = self.screen.get_size()
         panel = pygame.Surface((w, self.top_bar_h), pygame.SRCALPHA)
@@ -551,11 +734,13 @@ class NavalStrikeOnlineGame:
         self.sync_btn.draw(self.screen, f["small"], pygame.mouse.get_pos())
 
     def draw_message_bar(self):
+        """Dessine la barre de message contextuel sous la barre de titre."""
         f = self.fonts()
         draw_glass_panel(self.screen, self.message_rect, radius=12)
         draw_text(self.screen, self.message, f["small"], WHITE, center=self.message_rect.center)
 
     def draw_connecting(self):
+        """Dessine l'écran d'attente de connexion au serveur."""
         f = self.fonts()
         self.draw_title_bar("Connexion")
         self.draw_message_bar()
@@ -565,6 +750,7 @@ class NavalStrikeOnlineGame:
         draw_text(self.screen, "Connexion au serveur...", f["big"], WHITE, center=panel.center)
 
     def draw_placement(self):
+        """Dessine l'écran de placement des bateaux avec le plateau, le panneau d'info et les boutons."""
         f = self.fonts()
         self.draw_title_bar(f"Placement - {self.local_name}")
         self.draw_message_bar()
@@ -592,6 +778,7 @@ class NavalStrikeOnlineGame:
         self.draw_ship_preview()
 
     def draw_battle(self):
+        """Dessine l'écran de bataille avec les deux grilles, les noms des joueurs et les panneaux d'état."""
         f = self.fonts()
         subtitle = "À toi de jouer" if self.turn else f"Tour de {self.enemy_name}"
         self.draw_title_bar(subtitle)
@@ -604,6 +791,7 @@ class NavalStrikeOnlineGame:
         self.draw_status_panel(self.right_status_rect, "Flotte ennemie", self.enemy_board)
 
     def draw_end(self):
+        """Dessine l'écran de fin de partie (victoire/défaite) par-dessus la vue de bataille."""
         f = self.fonts()
         self.draw_battle()
         w, h = self.screen.get_size()
@@ -628,6 +816,7 @@ class NavalStrikeOnlineGame:
         draw_text(self.screen, "Ferme la fenêtre pour revenir au menu.", f["small"], WHITE, center=(panel.centerx, panel.y + 210))
 
     def draw(self):
+        """Dessine le fond océan puis délègue au sous-écran correspondant à l'état courant."""
         draw_vertical_gradient(self.screen, BG_TOP, BG_BOTTOM)
         draw_ocean_overlay(self.screen)
         if self.state == "connecting":
@@ -640,6 +829,11 @@ class NavalStrikeOnlineGame:
             self.draw_end()
 
     def handle_event(self, event):
+        """
+        Dispatch les événements Pygame selon l'état courant (redimensionnement, placement, tir, fin).
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         if event.type == pygame.VIDEORESIZE:
             self.screen = pygame.display.set_mode((max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
             self.compute_layout()
@@ -695,6 +889,7 @@ class NavalStrikeOnlineGame:
                     self.request_rematch()
 
     def run(self):
+        """Lance la boucle principale : tick, réseau, événements, dessin et flip."""
         while self.running:
             self.clock.tick(FPS)
             self.process_network()

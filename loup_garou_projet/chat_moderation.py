@@ -15,6 +15,11 @@ from pathlib import Path
 
 class ChatModerator:
     def __init__(self, csv_path):
+        """
+        Initialise le modérateur en chargeant les patterns de modération depuis le fichier CSV.
+
+        :param csv_path: Chemin vers le fichier CSV de termes interdits (str ou Path).
+        """
         self.csv_path = Path(csv_path)
         self.patterns = []   # liste de regex compilées, chargées depuis le CSV
         self._load_patterns()

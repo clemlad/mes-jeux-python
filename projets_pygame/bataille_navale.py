@@ -88,6 +88,13 @@ FONT_TITLE = pygame.font.SysFont("arial", 64)
 # UTILITAIRES
 # ==========================================================
 def draw_vertical_gradient(surface, top_color, bottom_color):
+    """
+    Dessine un dégradé vertical entre deux couleurs sur toute la surface, avec un léger glow en haut.
+
+    :param surface: Surface pygame cible (pygame.Surface).
+    :param top_color: Couleur en haut du dégradé (tuple RGB).
+    :param bottom_color: Couleur en bas du dégradé (tuple RGB).
+    """
     for y in range(HEIGHT):
         ratio = y / HEIGHT
         r = int(top_color[0] * (1 - ratio) + bottom_color[0] * ratio)
@@ -104,6 +111,11 @@ def draw_vertical_gradient(surface, top_color, bottom_color):
         surface.blit(overlay, (0, i))
 
 def draw_ocean_overlay(surface):
+    """
+    Dessine une grille discrète de lignes horizontales et verticales en overlay.
+
+    :param surface: Surface pygame cible (pygame.Surface).
+    """
     # lignes horizontales très discrètes
     for y in range(0, HEIGHT, 48):
         pygame.draw.line(surface, GRID_SOFT, (0, y), (WIDTH, y), 1)
@@ -114,6 +126,13 @@ def draw_ocean_overlay(surface):
 
 
 def draw_glass_panel(surface, rect, radius=18):
+    """
+    Dessine un panneau semi-transparent avec bord arrondi (effet verre).
+
+    :param surface: Surface pygame cible (pygame.Surface).
+    :param rect: Zone du panneau (pygame.Rect).
+    :param radius: Rayon des coins arrondis en pixels (int), 18 par défaut.
+    """
     panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
 
     pygame.draw.rect(panel, PANEL_FILL, (0, 0, rect.width, rect.height), border_radius=radius)
@@ -123,6 +142,17 @@ def draw_glass_panel(surface, rect, radius=18):
 
 
 def draw_text(surface, text, font, color, center=None, topleft=None):
+    """
+    Dessine du texte sur une surface, positionné par son centre ou son coin supérieur gauche.
+
+    :param surface: Surface pygame cible (pygame.Surface).
+    :param text: Chaîne de texte à afficher (str).
+    :param font: Police utilisée (pygame.font.Font).
+    :param color: Couleur du texte (tuple RGB).
+    :param center: Coordonnées (x, y) du centre du texte (tuple[int, int] ou None).
+    :param topleft: Coordonnées (x, y) du coin supérieur gauche (tuple[int, int] ou None).
+    :return: pygame.Rect du texte rendu.
+    """
     img = font.render(text, True, color)
     rect = img.get_rect()
     if center is not None:
@@ -134,12 +164,30 @@ def draw_text(surface, text, font, color, center=None, topleft=None):
 
 
 def board_to_pixel(board_x, board_y, row, col):
+    """
+    Convertit des coordonnées de grille (ligne, colonne) en coordonnées pixel sur l'écran.
+
+    :param board_x: Coordonnée X du coin supérieur gauche de la grille (int).
+    :param board_y: Coordonnée Y du coin supérieur gauche de la grille (int).
+    :param row: Ligne dans la grille, 0-indexé (int).
+    :param col: Colonne dans la grille, 0-indexé (int).
+    :return: Tuple (x, y) en pixels (tuple[int, int]).
+    """
     x = board_x + col * CELL_SIZE
     y = board_y + row * CELL_SIZE
     return x, y
 
 
 def pixel_to_board(mouse_x, mouse_y, board_x, board_y):
+    """
+    Convertit des coordonnées souris en coordonnées de grille (ligne, colonne).
+
+    :param mouse_x: Coordonnée X de la souris en pixels (int).
+    :param mouse_y: Coordonnée Y de la souris en pixels (int).
+    :param board_x: Coordonnée X du coin supérieur gauche de la grille (int).
+    :param board_y: Coordonnée Y du coin supérieur gauche de la grille (int).
+    :return: Tuple (row, col) si dans la grille, None sinon.
+    """
     rel_x = mouse_x - board_x
     rel_y = mouse_y - board_y
 
@@ -159,12 +207,25 @@ def pixel_to_board(mouse_x, mouse_y, board_x, board_y):
 # ==========================================================
 class Button:
     def __init__(self, text, rect, color_idle=(70, 90, 130), color_hover=(100, 130, 180)):
+        """
+        Initialise un bouton UI avec une zone cliquable et des couleurs d'état.
+
+        :param text: Texte affiché sur le bouton (str).
+        :param rect: Tuple (x, y, w, h) ou pygame.Rect définissant la zone du bouton.
+        :param color_idle: Couleur de fond au repos (tuple RGB).
+        :param color_hover: Couleur de fond au survol (tuple RGB).
+        """
         self.text = text
         self.rect = pygame.Rect(rect)
         self.color_idle = color_idle
         self.color_hover = color_hover
 
     def draw(self, surface):
+        """
+        Dessine le bouton sur la surface donnée avec ombre, reflet et changement de couleur au survol.
+
+        :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+        """
         mouse = pygame.mouse.get_pos()
         hovered = self.rect.collidepoint(mouse)
         color = self.color_hover if hovered else self.color_idle
@@ -186,6 +247,12 @@ class Button:
         draw_text(surface, self.text, FONT_MEDIUM, WHITE, center=self.rect.center)
 
     def is_clicked(self, pos):
+        """
+        Retourne True si la position donnée est dans la zone du bouton.
+
+        :param pos: Coordonnées (x, y) du clic (tuple[int, int]).
+        :return: bool
+        """
         return self.rect.collidepoint(pos)
 
 # ==========================================================
@@ -193,19 +260,36 @@ class Button:
 # ==========================================================
 class Ship:
     def __init__(self, name, size):
+        """
+        Initialise un bateau avec son nom et sa taille.
+
+        :param name: Nom du bateau (str), ex : 'Porte-avion'.
+        :param size: Nombre de cases occupées (int).
+        """
         self.name = name
         self.size = size
         self.positions = []
         self.hits = set()
 
     def place(self, positions):
+        """
+        Enregistre les cases occupées par le bateau et réinitialise ses touches.
+
+        :param positions: Liste de tuples (row, col) (list[tuple[int, int]]).
+        """
         self.positions = positions
         self.hits = set()
 
     def is_sunk(self):
+        """Retourne True si toutes les cases du bateau ont été touchées (bool)."""
         return len(self.hits) == len(self.positions)
 
     def register_hit(self, pos):
+        """
+        Enregistre un tir touché sur la case donnée.
+
+        :param pos: Coordonnées touchées (tuple[int, int]).
+        """
         if pos in self.positions:
             self.hits.add(pos)
 
@@ -219,19 +303,43 @@ class Board:
         self.shots = {}  # (r,c) -> "hit" / "miss"
 
     def reset(self):
+        """Supprime tous les bateaux et tous les tirs de la grille."""
         self.ships = []
         self.shots = {}
 
     def inside(self, row, col):
+        """
+        Retourne True si la case (row, col) est dans les limites de la grille.
+
+        :param row: Ligne (int), 0 à GRID_SIZE-1.
+        :param col: Colonne (int), 0 à GRID_SIZE-1.
+        :return: bool
+        """
         return 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE
 
     def ship_at(self, row, col):
+        """
+        Retourne le bateau occupant la case (row, col), ou None si la case est libre.
+
+        :param row: Ligne (int).
+        :param col: Colonne (int).
+        :return: Ship ou None.
+        """
         for ship in self.ships:
             if (row, col) in ship.positions:
                 return ship
         return None
 
     def can_place_ship(self, row, col, size, orientation):
+        """
+        Vérifie si un bateau standard peut être placé à la position donnée.
+
+        :param row: Ligne de départ (int).
+        :param col: Colonne de départ (int).
+        :param size: Nombre de cases du bateau (int).
+        :param orientation: 'H' pour horizontal, 'V' pour vertical (str).
+        :return: Tuple (bool, list[tuple[int, int]]) : validité et liste des positions.
+        """
         positions = []
 
         for i in range(size):
@@ -249,6 +357,14 @@ class Board:
         return True, positions
     
     def can_place_submarine(self, row, col, orientation):
+        """
+        Vérifie si le sous-marin en T peut être placé autour de la case centrale.
+
+        :param row: Ligne de la case centrale (int).
+        :param col: Colonne de la case centrale (int).
+        :param orientation: Direction de la branche : 'haut', 'bas', 'gauche' ou 'droite' (str).
+        :return: Tuple (bool, list[tuple[int, int]]) : validité et liste des positions.
+        """
         if orientation == "haut":
             positions = [(row, col-1), (row, col), (row, col+1), (row-1, col)]
         elif orientation == "bas":
@@ -269,6 +385,15 @@ class Board:
         return True, positions
     
     def place_ship(self, ship, row, col, orientation):
+        """
+        Tente de placer un bateau sur la grille ; retourne True si le placement est valide.
+
+        :param ship: Instance de Ship à placer (Ship).
+        :param row: Ligne de départ (int).
+        :param col: Colonne de départ (int).
+        :param orientation: 'H', 'V' pour bateaux normaux ; 'haut'/'bas'/'gauche'/'droite' pour le sous-marin (str).
+        :return: bool
+        """
         if ship.name == "Sous-marin T":
             valid, positions = self.can_place_submarine(row, col, orientation)
         else:
@@ -285,6 +410,7 @@ class Board:
         return True
     
     def auto_place_all(self):
+        """Place automatiquement tous les bateaux de manière aléatoire sur la grille."""
         self.reset()
 
         for name, size in SHIPS_CONFIG:
@@ -302,6 +428,13 @@ class Board:
                 placed = self.place_ship(ship, row, col, orientation)
 
     def receive_shot(self, row, col):
+        """
+        Enregistre un tir sur la grille et retourne le résultat.
+
+        :param row: Ligne visée (int).
+        :param col: Colonne visée (int).
+        :return: Tuple ('already'/'miss'/'hit'/'sunk', Ship ou None).
+        """
         if (row, col) in self.shots:
             return "already", None
 
@@ -317,6 +450,7 @@ class Board:
         return "miss", None
 
     def all_sunk(self):
+        """Retourne True si tous les bateaux de la grille sont coulés (bool)."""
         return len(self.ships) > 0 and all(ship.is_sunk() for ship in self.ships)
 
 
@@ -335,9 +469,24 @@ class BotAI:
         random.shuffle(self.fallback_cells)
 
     def valid_unknown(self, board, row, col):
+        """
+        Retourne True si la case est dans la grille et n'a pas encore été visée.
+
+        :param board: Grille ciblée (Board).
+        :param row: Ligne (int).
+        :param col: Colonne (int).
+        :return: bool
+        """
         return board.inside(row, col) and (row, col) not in board.shots
 
     def neighbors4(self, row, col):
+        """
+        Retourne les 4 voisins orthogonaux de la case (row, col) sans vérification de limite.
+
+        :param row: Ligne (int).
+        :param col: Colonne (int).
+        :return: list[tuple[int, int]]
+        """
         return [(row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)]
 
     def get_unsunk_hit_cells(self, board):
@@ -379,6 +528,12 @@ class BotAI:
         return groups
 
     def infer_axis(self, group):
+        """
+        Déduit l'axe d'un groupe de cases touchées : 'H', 'V' ou 'MIXED'.
+
+        :param group: Liste de tuples (row, col) de cases touchées consécutives (list[tuple[int, int]]).
+        :return: 'H', 'V', 'MIXED' ou None si le groupe fait moins de 2 cases.
+        """
         if len(group) < 2:
             return None
 
@@ -392,6 +547,13 @@ class BotAI:
         return "MIXED"
 
     def candidate_shots_for_group(self, board, group):
+        """
+        Détermine les cases candidates pour continuer de toucher un bateau partiellement atteint.
+
+        :param board: Grille ciblée (Board).
+        :param group: Liste de tuples (row, col) des cases déjà touchées du groupe (list[tuple[int, int]]).
+        :return: list[tuple[int, int]] — cases à viser en priorité.
+        """
         axis = self.infer_axis(group)
 
         # fonction locale : explorer tout autour du groupe
@@ -449,6 +611,12 @@ class BotAI:
         return around_group()
 
     def choose_shot(self, board):
+        """
+        Choisit la meilleure case à viser selon l'état de la grille (finir un bateau touché ou chasse en parité).
+
+        :param board: Grille ciblée (Board).
+        :return: Tuple (row, col) de la case choisie, ou None si toutes les cases sont jouées.
+        """
         unsunk_hits = self.get_unsunk_hit_cells(board)
 
         # priorité absolue : finir les bateaux déjà touchés
@@ -477,6 +645,16 @@ class BotAI:
         return None
 
     def process_result(self, board, row, col, result, sunk_ship):
+        """
+        Méthode de callback appelée après chaque tir de l'IA (actuellement sans effet).
+        L'IA relit directement le board à chaque tour plutôt que de maintenir un état interne.
+
+        :param board: Grille ciblée (Board).
+        :param row: Ligne visée (int).
+        :param col: Colonne visée (int).
+        :param result: Résultat du tir : 'miss', 'hit' ou 'sunk' (str).
+        :param sunk_ship: Bateau coulé si result == 'sunk', sinon None (Ship ou None).
+        """
         # plus besoin de mémoire interne spéciale :
         # l'IA relit directement le board à chaque tour
         pass
@@ -529,6 +707,7 @@ class NavalStrikeGame:
     # RESET / CONFIG
     # ======================================================
     def reset_full_game(self):
+        """Réinitialise complètement la partie : grilles, IA, indices de placement, tour et état."""
         self.player_board.reset()
         self.bot_board.reset()
 
@@ -553,22 +732,26 @@ class NavalStrikeGame:
         self.message = "Place ton Porte-avion (5 cases)."
     
     def start_vs_ai(self):
+        """Démarre une partie contre l'IA et passe à la phase de placement."""
         self.game_mode = "vs_ai"
         self.reset_full_game()
         self.state = "placement"
         self.message = "Place ton Porte-avion (5 cases)."
 
     def start_vs_local(self):
+        """Démarre une partie en local 1 vs 1 et passe à la phase de placement du joueur 1."""
         self.game_mode = "vs_local"
         self.reset_full_game()
         self.state = "placement"
         self.message = "Joueur 1 : place ton Porte-avion (5 cases)."
 
     def start_placement(self):
+        """Réinitialise la partie et repasse en phase de placement."""
         self.reset_full_game()
         self.state = "placement"
 
     def start_battle(self):
+        """Passe en phase de combat et affiche un message de début de partie."""
         self.state = "battle"
         self.message = "La bataille commence ! À toi de tirer."
 
@@ -576,11 +759,22 @@ class NavalStrikeGame:
     # SHIPS / PLACEMENT
     # ======================================================
     def current_ship_config(self):
+        """
+        Retourne la configuration (nom, taille) du prochain bateau à placer, ou None si tous sont placés.
+
+        :return: Tuple (str, int) ou None.
+        """
         if self.current_ship_index >= len(SHIPS_CONFIG):
             return None
         return SHIPS_CONFIG[self.current_ship_index]
 
     def place_current_ship(self, row, col):
+        """
+        Tente de placer le bateau en cours sur la case (row, col) avec l'orientation actuelle.
+
+        :param row: Ligne de la case cliquée (int).
+        :param col: Colonne de la case cliquée (int).
+        """
         config = self.current_ship_config()
         if config is None:
             return
@@ -627,6 +821,7 @@ class NavalStrikeGame:
             self.message = "Placement invalide : hors grille ou chevauchement."
 
     def auto_place_player(self):
+        """Place automatiquement tous les bateaux du joueur actif et passe à l'étape suivante."""
         active_board = self.player_board if self.current_placer == 1 else self.bot_board
         active_board.auto_place_all()
         self.current_ship_index = len(SHIPS_CONFIG)
@@ -649,6 +844,7 @@ class NavalStrikeGame:
                 self.message = "Placement terminé. Joueur 1, prépare-toi."
 
     def reset_player_placement(self):
+        """Réinitialise le placement du joueur actif et remet l'index de bateau à zéro."""
         active_board = self.player_board if self.current_placer == 1 else self.bot_board
         active_board.reset()
         self.current_ship_index = 0
@@ -663,6 +859,12 @@ class NavalStrikeGame:
     # TIRS
     # ======================================================
     def player_shoot(self, row, col):
+        """
+        Effectue le tir du joueur humain contre l'IA sur la case (row, col).
+
+        :param row: Ligne visée (int).
+        :param col: Colonne visée (int).
+        """
         result, ship = self.bot_board.receive_shot(row, col)
 
         if result == "already":
@@ -688,6 +890,12 @@ class NavalStrikeGame:
             self.message = "Victoire ! Toute la flotte ennemie a été détruite."
     
     def player1_shoot(self, row, col):
+        """
+        Effectue le tir du joueur 1 en mode local 1 vs 1 sur la case (row, col).
+
+        :param row: Ligne visée (int).
+        :param col: Colonne visée (int).
+        """
         result, ship = self.bot_board.receive_shot(row, col)
 
         if result == "already":
@@ -711,6 +919,12 @@ class NavalStrikeGame:
             self.message = "Victoire du Joueur 1 !"
 
     def player2_shoot(self, row, col):
+        """
+        Effectue le tir du joueur 2 en mode local 1 vs 1 sur la case (row, col).
+
+        :param row: Ligne visée (int).
+        :param col: Colonne visée (int).
+        """
         result, ship = self.player_board.receive_shot(row, col)
 
         if result == "already":
@@ -734,6 +948,7 @@ class NavalStrikeGame:
             self.message = "Victoire du Joueur 2 !"
 
     def bot_shoot(self):
+        """Effectue le tir automatique de l'IA sur la grille du joueur humain."""
         choice = self.bot_ai.choose_shot(self.player_board)
         if choice is None:
             return
@@ -765,6 +980,7 @@ class NavalStrikeGame:
     # UPDATE
     # ======================================================
     def update(self):
+        """Met à jour l'état de jeu à chaque frame : déclenche le tir IA et gère les transitions."""
         now = pygame.time.get_ticks()
 
         if self.state == "battle" and self.game_mode == "vs_ai" and self.turn == "bot":
@@ -783,6 +999,11 @@ class NavalStrikeGame:
     # INPUT
     # ======================================================
     def handle_event(self, event):
+        """
+        Dispatche un événement pygame vers le gestionnaire correspondant à l'état actuel.
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
@@ -803,6 +1024,11 @@ class NavalStrikeGame:
             self.handle_end_event(event)
 
     def handle_menu_event(self, event):
+        """
+        Traite les événements de l'écran de menu principal.
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.menu_play.is_clicked(event.pos):
                 self.state = "mode_select"
@@ -813,6 +1039,11 @@ class NavalStrikeGame:
                 sys.exit()
 
     def handle_mode_select_event(self, event):
+        """
+        Traite les événements de l'écran de sélection du mode de jeu.
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.state = "menu"
@@ -828,6 +1059,11 @@ class NavalStrikeGame:
                 self.state = "menu"
 
     def handle_rules_event(self, event):
+        """
+        Traite les événements de l'écran des règles (tout clic ou touche ferme cet écran).
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_SPACE):
             self.state = "menu"
 
@@ -835,6 +1071,11 @@ class NavalStrikeGame:
             self.state = "menu"
 
     def handle_placement_event(self, event):
+        """
+        Traite les événements de la phase de placement : touche R pour rotation, clic pour placer.
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.state = "menu"
@@ -868,6 +1109,11 @@ class NavalStrikeGame:
                 self.place_current_ship(cell[0], cell[1])
 
     def handle_battle_event(self, event):
+        """
+        Traite les événements de la phase de combat : clic sur la grille ennemie pour tirer.
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.state = "menu"
             return
@@ -888,6 +1134,11 @@ class NavalStrikeGame:
                         self.player2_shoot(cell[0], cell[1])
     
     def handle_transition_event(self, event):
+        """
+        Traite les événements de l'écran de transition entre deux joueurs (appui Entrée ou clic).
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 self.state = "menu"
@@ -906,6 +1157,11 @@ class NavalStrikeGame:
                 self.state = "battle"
 
     def handle_end_event(self, event):
+        """
+        Traite les événements de l'écran de fin de partie (rejouer ou retour menu).
+
+        :param event: Événement pygame (pygame.event.Event).
+        """
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.end_replay.is_clicked(event.pos):
                 self.start_placement()
@@ -922,6 +1178,15 @@ class NavalStrikeGame:
     # DRAW HELPERS
     # ======================================================
     def draw_board(self, surface, board, x, y, reveal_ships=False):
+        """
+        Dessine une grille de bataille navale avec les tirs, les bateaux et les coulés.
+
+        :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+        :param board: Grille à afficher (Board).
+        :param x: Coordonnée X du coin supérieur gauche de la grille (int).
+        :param y: Coordonnée Y du coin supérieur gauche de la grille (int).
+        :param reveal_ships: Si True, affiche les bateaux non coulés (bool).
+        """
         # fond grille
         grid_rect = pygame.Rect(x - 8, y - 8, GRID_SIZE * CELL_SIZE + 16, GRID_SIZE * CELL_SIZE + 16)
         pygame.draw.rect(surface, NAVY, grid_rect, border_radius=14)
@@ -969,6 +1234,11 @@ class NavalStrikeGame:
                     pygame.draw.rect(surface, SUNK_BORDER, sunk_rect, 2, border_radius=8)
 
     def draw_ship_preview(self, surface):
+        """
+        Dessine un aperçu coloré du bateau en cours de placement au survol de la grille.
+
+        :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+        """
         if self.state != "placement" or self.hover_cell is None:
             return
         if self.current_ship_index >= len(SHIPS_CONFIG):
@@ -1000,6 +1270,11 @@ class NavalStrikeGame:
     # DRAW STATES
     # ======================================================
     def draw_title_bar(self, subtitle):
+        """
+        Dessine la barre de titre en haut de l'écran avec le titre du jeu et un sous-titre.
+
+        :param subtitle: Texte du sous-titre à afficher sous le titre (str).
+        """
         header = pygame.Rect(0, 0, WIDTH, 120)
 
         panel = pygame.Surface((WIDTH, 120), pygame.SRCALPHA)
@@ -1017,6 +1292,7 @@ class NavalStrikeGame:
         draw_text(screen, subtitle, FONT_MEDIUM, CYAN, center=(WIDTH // 2, 90))
 
     def draw_menu(self):
+        """Dessine l'écran de menu principal avec les boutons Jouer, Règles et Quitter."""
         self.draw_title_bar("Choisis une action")
 
         center_x = WIDTH // 2
@@ -1043,6 +1319,7 @@ class NavalStrikeGame:
         self.menu_quit.draw(screen)
     
     def draw_mode_select(self):
+        """Dessine l'écran de sélection du mode de jeu (1 vs IA ou 1 vs 1 local)."""
         self.draw_title_bar("Choisis un mode de jeu")
 
         center_x = WIDTH // 2
@@ -1068,6 +1345,7 @@ class NavalStrikeGame:
         self.mode_back.draw(screen)
 
     def draw_rules(self):
+        """Dessine l'écran des règles du jeu."""
         self.draw_title_bar("Règles du jeu")
 
         panel = pygame.Rect(120, 150, WIDTH - 240, 470)
@@ -1091,6 +1369,7 @@ class NavalStrikeGame:
             y += 42
 
     def draw_placement(self):
+        """Dessine l'écran de placement des bateaux avec aperçu au survol et panneau d'instructions."""
         if self.game_mode == "vs_local":
             self.draw_title_bar(f"Placement Joueur {self.current_placer}")
         else:
@@ -1119,6 +1398,15 @@ class NavalStrikeGame:
         self.place_reset_btn.draw(screen)
     
     def draw_fleet_status(self, surface, board, x, y, title):
+        """
+        Dessine un panneau d'état de la flotte indiquant pour chaque bateau s'il est OK ou KO.
+
+        :param surface: Surface pygame sur laquelle dessiner (pygame.Surface).
+        :param board: Grille dont on affiche l'état des bateaux (Board).
+        :param x: Coordonnée X du coin supérieur gauche du panneau (int).
+        :param y: Coordonnée Y du coin supérieur gauche du panneau (int).
+        :param title: Titre du panneau (str).
+        """
         panel_width = 270
         panel_height = 155
         panel = pygame.Rect(x, y, panel_width, panel_height)
@@ -1141,6 +1429,7 @@ class NavalStrikeGame:
             line_y += 21
 
     def draw_battle(self):
+        """Dessine l'écran de combat avec les deux grilles et les panneaux de statut des flottes."""
         if self.game_mode == "vs_ai":
             subtitle = "À toi de jouer" if self.turn == "player" else "L'ordinateur réfléchit..."
             left_board = self.player_board
@@ -1184,6 +1473,7 @@ class NavalStrikeGame:
                 self.draw_fleet_status(screen, self.player_board, RIGHT_GRID_X + 10, status_y, "Flotte Joueur 1")
 
     def draw_transition(self):
+        """Dessine l'écran de transition entre les tours de deux joueurs locaux."""
         self.draw_title_bar("Passage de relais")
 
         panel = pygame.Rect(WIDTH // 2 - 260, 220, 520, 250)
@@ -1202,6 +1492,7 @@ class NavalStrikeGame:
         draw_text(screen, "L'autre joueur ne doit pas regarder l'écran.", FONT_SMALL, WHITE, center=(WIDTH // 2, 400))
 
     def draw_end(self):
+        """Dessine l'écran de fin de partie avec le résultat, les boutons Rejouer et Menu."""
         if self.game_mode == "vs_ai":
             title = "VICTOIRE !" if self.winner == "player" else "DÉFAITE"
             color = GREEN if self.winner == "player" else RED
@@ -1224,11 +1515,13 @@ class NavalStrikeGame:
         self.end_menu.draw(screen)
 
     def draw_message_bar(self):
+        """Dessine la barre de message en bas de l'écran avec le message d'état courant."""
         bar = pygame.Rect(60, HEIGHT - 58, WIDTH - 120, 36)
         pygame.draw.rect(screen, (255, 255, 255), bar, border_radius=10)
         draw_text(screen, self.message, FONT_SMALL, BLACK, center=bar.center)
 
     def draw(self):
+        """Efface l'écran et dessine l'état actuel du jeu selon la phase en cours."""
         draw_vertical_gradient(screen, BG_TOP, BG_BOTTOM)
         draw_ocean_overlay(screen)
 
@@ -1253,6 +1546,7 @@ class NavalStrikeGame:
     # LOOP
     # ======================================================
     def run(self):
+        """Lance la boucle principale du jeu : événements, mise à jour et rendu."""
         while True:
             clock.tick(FPS)
 

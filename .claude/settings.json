@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\cleme\\\\OneDrive\\\\Desktop\\\\cours\\\\code\\\\mes-jeux-python\" -Recurse -Directory)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\cleme\\\\OneDrive\\\\Desktop\\\\cours\\\\code\\\\mes-jeux-python\" -Recurse -Filter \"*.py\")",
+      "Bash(Sort-Object FullName)"
     ]
   }
 }

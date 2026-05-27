@@ -86,10 +86,23 @@ _WITCH_MSGS = [
 
 
 def _role_badge_col(role: str) -> tuple:
+    """
+    Retourne la couleur RGB associée au badge du rôle donné.
+
+    :param role: Nom du rôle (str).
+    :return: Tuple RGB (tuple[int, int, int]).
+    """
     return ROLE_BADGE_COLORS.get(role, MIST_PURPLE)
 
 
 def _ai_chat_msg(player: dict, players: list) -> str:
+    """
+    Génère un message de chat aléatoire pour un joueur IA selon son rôle.
+
+    :param player: Dictionnaire du joueur IA avec au moins les clés 'role' et 'id' (dict).
+    :param players: Liste complète des joueurs de la partie (list[dict]).
+    :return: str — message de chat généré.
+    """
     role = player.get("role", "Villageois")
     alive = [p for p in players if p["alive"] and p["id"] != player["id"]]
     if not alive:
@@ -121,6 +134,13 @@ def _ai_chat_msg(player: dict, players: list) -> str:
 
 class WerewolfSoloGame:
     def __init__(self, player_name="Joueur", player_count=6, role_config=None):
+        """
+        Initialise le jeu solo : fenêtre, état de partie, joueurs, boutons et lance la partie.
+
+        :param player_name: Pseudonyme du joueur humain (str).
+        :param player_count: Nombre total de joueurs humain + IA (int).
+        :param role_config: Configuration des rôles {nom_rôle: quantité} (dict ou None).
+        """
         pygame.init()
         self.screen = pygame.display.set_mode((BASE_W, BASE_H), pygame.RESIZABLE)
         pygame.display.set_caption("Loup-Garou – Solo")
@@ -218,10 +238,16 @@ class WerewolfSoloGame:
     # ── Fonts & Layout ────────────────────────────────────────────────────────
 
     def fonts(self) -> dict:
+        """
+        Retourne le dictionnaire de polices mises à l'échelle selon la taille courante de la fenêtre.
+
+        :return: dict avec les clés 'title', 'big', 'medium', 'small', 'xs'.
+        """
         w, h = self.screen.get_size()
         return scaled_fonts(w, h, BASE_W, BASE_H)
 
     def compute_layout(self):
+        """Recalcule les rectangles des zones d'affichage et repositionne tous les boutons."""
         w, h = self.screen.get_size()
         pad = 16
         self.top_rect    = pygame.Rect(pad, pad, w - pad * 2, 72)
@@ -246,10 +272,21 @@ class WerewolfSoloGame:
     # ── Queue temporisée ──────────────────────────────────────────────────────
 
     def schedule(self, delay_ms: float, fn):
+        """
+        Planifie l'exécution d'une fonction après un délai de jeu.
+
+        :param delay_ms: Délai en millisecondes à partir du temps de jeu courant (float).
+        :param fn: Fonction sans argument à exécuter (callable).
+        """
         self.action_queue.append((self.game_ms + delay_ms, fn))
         self.action_queue.sort(key=lambda x: x[0])
 
     def update(self, dt_ms: float):
+        """
+        Avance l'horloge de jeu et exécute les actions planifiées arrivées à échéance.
+
+        :param dt_ms: Temps écoulé depuis la dernière frame en millisecondes (float).
+        """
         self.game_ms += dt_ms
         while self.action_queue and self.action_queue[0][0] <= self.game_ms:
             _, fn = self.action_queue.pop(0)
@@ -258,11 +295,23 @@ class WerewolfSoloGame:
     # ── Helpers logs ──────────────────────────────────────────────────────────
 
     def night_msg(self, msg: str):
+        """
+        Ajoute un message au journal de nuit (limité à 10 entrées).
+
+        :param msg: Message à afficher dans le journal de nuit (str).
+        """
         self.night_log.append(msg)
         if len(self.night_log) > 10:
             self.night_log.pop(0)
 
     def add_chat(self, author: str, text: str, wolf: bool = False):
+        """
+        Ajoute un message au chat (limité à 40 entrées).
+
+        :param author: Nom de l'auteur (str).
+        :param text: Contenu du message (str).
+        :param wolf: True si le message est visible uniquement par les loups (bool).
+        """
         self.chat_log.append({"author": author, "text": text, "wolf": wolf})
         if len(self.chat_log) > 40:
             self.chat_log.pop(0)
@@ -270,6 +319,7 @@ class WerewolfSoloGame:
     # ── Initialisation ────────────────────────────────────────────────────────
 
     def setup_game(self):
+        """Crée les joueurs, distribue les rôles, initialise tous les états et démarre la première nuit."""
         try:
             roles = build_roles(self.total_players, self.role_config)
         except ValueError:
@@ -346,13 +396,28 @@ class WerewolfSoloGame:
         self.add_chat("Système", "Bonne chance ! Les rôles ont été distribués.", False)
         self._start_night()
 
-    def current_player(self):    return self.players[self.player_id]
-    def current_role(self) -> str: return self.current_player()["role"]
+    def current_player(self):
+        """Retourne le dictionnaire du joueur humain."""
+        return self.players[self.player_id]
+
+    def current_role(self) -> str:
+        """Retourne le nom du rôle du joueur humain."""
+        return self.current_player()["role"]
 
     def alive_ids(self) -> list:
+        """
+        Retourne la liste des IDs des joueurs encore vivants.
+
+        :return: list[int]
+        """
         return [p["id"] for p in self.players if p["alive"]]
 
     def human_can_act(self) -> bool:
+        """
+        Retourne True si le joueur humain peut actuellement effectuer une action (vote, action de nuit, etc.).
+
+        :return: bool
+        """
         if self.winner:
             return False
         if self.hunter_pending or self.cupidon_pending or self.wild_child_pending:
@@ -383,6 +448,12 @@ class WerewolfSoloGame:
         return False
 
     def random_target(self, exclude=None):
+        """
+        Retourne un ID de joueur vivant choisi aléatoirement, en excluant les IDs indiqués.
+
+        :param exclude: ID ou ensemble d'IDs à exclure (int, set ou None).
+        :return: int ou None si aucun joueur disponible.
+        """
         if isinstance(exclude, int):
             exclude = {exclude}
         elif exclude is None:
@@ -393,6 +464,7 @@ class WerewolfSoloGame:
     # ── Phase de nuit ─────────────────────────────────────────────────────────
 
     def _start_night(self):
+        """Initialise une nouvelle nuit : remet à zéro les logs et planifie les tours des rôles dans l'ordre."""
         self.is_animating  = True
         self.action_hint   = ""
         self.seer_result   = None
@@ -419,6 +491,12 @@ class WerewolfSoloGame:
         t = self._chain_wolves(t)
 
     def _chain_cupidon(self, t: int) -> int:
+        """
+        Planifie le tour de Cupidon dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes dans la queue d'actions (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         cupidon = next((p for p in self.players if p["alive"] and p["role"] == "Cupidon"), None)
         if not cupidon:
             return t
@@ -445,6 +523,12 @@ class WerewolfSoloGame:
         return t
 
     def _chain_wild_child(self, t: int) -> int:
+        """
+        Planifie le tour de l'Enfant sauvage dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         wc = next((p for p in self.players if p["alive"] and p["role"] == "Enfant sauvage"), None)
         if not wc:
             return t
@@ -470,6 +554,12 @@ class WerewolfSoloGame:
         return t
 
     def _chain_wolves(self, t: int) -> int:
+        """
+        Planifie le tour des loups-garous dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         wolves = [p for p in self.players if p["alive"] and is_wolf_player(p)]
         if wolves:
             self.schedule(t, lambda: self.night_msg("Les loups-garous se réveillent..."))
@@ -495,6 +585,12 @@ class WerewolfSoloGame:
         return self._chain_seer(t)
 
     def _chain_seer(self, t: int) -> int:
+        """
+        Planifie le tour de la Voyante dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         seer = next((p for p in self.players if p["alive"] and p["role"] == "Voyante"), None)
         if not seer:
             return self._chain_witch(t)
@@ -518,6 +614,12 @@ class WerewolfSoloGame:
             return self._chain_witch(t)
 
     def _chain_witch(self, t: int) -> int:
+        """
+        Planifie le tour de la Sorcière dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         witch = next((p for p in self.players if p["alive"] and p["role"] == "Sorcière"), None)
         if not witch:
             return self._chain_salvateur(t)
@@ -549,6 +651,12 @@ class WerewolfSoloGame:
             return self._chain_salvateur(t)
 
     def _chain_salvateur(self, t: int) -> int:
+        """
+        Planifie le tour du Salvateur dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         sal = next((p for p in self.players if p["alive"] and p["role"] == "Salvateur"), None)
         if not sal:
             return self._chain_fox(t)
@@ -576,6 +684,12 @@ class WerewolfSoloGame:
             return self._chain_fox(t)
 
     def _chain_fox(self, t: int) -> int:
+        """
+        Planifie le tour du Renard dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         fox = next((p for p in self.players if p["alive"] and p["role"] == "Renard"), None)
         if not fox or not self.fox_power_active:
             return self._chain_siren(t)
@@ -604,6 +718,12 @@ class WerewolfSoloGame:
             return self._chain_siren(t)
 
     def _chain_siren(self, t: int) -> int:
+        """
+        Planifie le tour de la Sirène dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         siren = next((p for p in self.players if p["alive"] and p["role"] == "Sirène"), None)
         if not siren:
             return self._chain_arsonist(t)
@@ -630,6 +750,12 @@ class WerewolfSoloGame:
             return self._chain_arsonist(t)
 
     def _chain_arsonist(self, t: int) -> int:
+        """
+        Planifie le tour du Pyromane dans la chaîne de nuit.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Nouveau temps de départ pour la prochaine étape (int).
+        """
         pyro = next((p for p in self.players if p["alive"] and p["role"] == "Pyromane"), None)
         if not pyro:
             return self._chain_end(t)
@@ -668,12 +794,19 @@ class WerewolfSoloGame:
             return self._chain_end(t)
 
     def _chain_end(self, t: int) -> int:
+        """
+        Termine la chaîne de nuit en planifiant la résolution des actions nocturnes.
+
+        :param t: Temps de départ en millisecondes (int).
+        :return: Temps inchangé (int).
+        """
         self.schedule(t, self._resolve_night)
         return t
 
     # ── Pauses humain ─────────────────────────────────────────────────────────
 
     def _pause_human_cupidon(self):
+        """Suspend l'animation et active le mode de sélection pour l'action humaine de Cupidon."""
         self.is_animating       = False
         self.cupidon_pending    = True
         self.cupidon_selections = []
@@ -681,20 +814,24 @@ class WerewolfSoloGame:
                             "puis valide. (0/2 sélectionnés)")
 
     def _pause_human_wild_child(self):
+        """Suspend l'animation et active le mode de sélection pour l'action humaine de l'Enfant sauvage."""
         self.is_animating   = False
         self.wild_child_pending = True
         self.action_hint = ("Tu es l'Enfant sauvage : choisis ton mentor. "
                             "Si il meurt, tu deviendras loup.")
 
     def _pause_human_wolf(self):
+        """Suspend l'animation et affiche le message d'action pour le joueur humain loup-garou."""
         self.is_animating = False
         self.action_hint  = "Tu es loup-garou : désigne une victime parmi les vivants."
 
     def _pause_human_seer(self):
+        """Suspend l'animation et affiche le message d'action pour la Voyante humaine."""
         self.is_animating = False
         self.action_hint  = "Tu es Voyante : choisis un joueur pour voir son rôle."
 
     def _pause_human_witch(self):
+        """Suspend l'animation et affiche le message contextuel pour la Sorcière humaine."""
         self.is_animating = False
         wolf_tgt = self.pending_night.get("wolf_target")
         if wolf_tgt is not None:
@@ -705,6 +842,7 @@ class WerewolfSoloGame:
             self.action_hint = "Tu es Sorcière : personne n'est visé. Empoisonner quelqu'un ?"
 
     def _pause_human_salvateur(self):
+        """Suspend l'animation et affiche le message d'action pour le Salvateur humain."""
         self.is_animating = False
         last_name = (self.players[self.salvateur_last_protected]["name"]
                      if self.salvateur_last_protected is not None else "personne")
@@ -712,6 +850,7 @@ class WerewolfSoloGame:
                             f"Interdit : {last_name} (nuit précédente).")
 
     def _pause_human_fox(self):
+        """Suspend l'animation et active le mode de sélection triplex pour le Renard humain."""
         self.is_animating  = False
         self.fox_pending   = True
         self.fox_selections = []
@@ -719,6 +858,7 @@ class WerewolfSoloGame:
                             "parmi eux. (0/3 sélectionnés)")
 
     def _pause_human_siren(self):
+        """Suspend l'animation et affiche la liste des envoûtés pour la Sirène humaine."""
         self.is_animating = False
         charmed = [self.players[i]["name"] for i in self.charmed_players
                    if i < len(self.players)]
@@ -727,6 +867,7 @@ class WerewolfSoloGame:
                             f"Déjà envoûtés : {already}.")
 
     def _pause_human_pyro(self):
+        """Suspend l'animation et affiche la liste des aspergés pour le Pyromane humain."""
         self.is_animating = False
         fueled = [self.players[i]["name"] for i in self.fueled_players
                   if i < len(self.players)]
@@ -740,6 +881,7 @@ class WerewolfSoloGame:
     # ── Reprise après action humaine ──────────────────────────────────────────
 
     def _resume_after_human(self):
+        """Reprend la chaîne de nuit après l'action du joueur humain, en passant à l'étape suivante selon son rôle."""
         role = self.current_role()
         self.is_animating = True
         self.action_hint  = ""
@@ -796,25 +938,53 @@ class WerewolfSoloGame:
             self._chain_end(t)
 
     def _schedule_chain(self, fn, t: int):
+        """
+        Planifie l'appel d'une fonction de chaîne avec un offset nul après un délai.
+
+        :param fn: Fonction à appeler, prenant un temps de départ (callable).
+        :param t: Délai en millisecondes avant l'appel (int).
+        """
         self.schedule(t, lambda: fn(0))
 
     def _chain_wild_child_then_wolves(self, t: int):
+        """
+        Enchaîne le tour de l'Enfant sauvage puis celui des loups, en tenant compte d'une éventuelle pause humaine.
+
+        :param t: Paramètre de temps non utilisé directement (int).
+        """
         new_t = self._chain_wild_child(0)
         if not self.wild_child_pending:
             self._do_chain_wolves(new_t)
 
     def _do_chain_wolves(self, t: int):
+        """
+        Lance directement la chaîne des loups à partir du temps donné.
+
+        :param t: Temps de départ en millisecondes (int).
+        """
         self._chain_wolves(t)
 
     # ── Résolution de nuit ────────────────────────────────────────────────────
 
     def _apply_death(self, pid: int, deaths: set):
+        """
+        Marque un joueur comme mort et enregistre son rôle révélé dans l'ensemble des décès.
+
+        :param pid: Indice du joueur à tuer (int).
+        :param deaths: Ensemble des identifiants de joueurs morts ce tour (set), modifié en place.
+        """
         if self.players[pid]["alive"]:
             self.players[pid]["alive"]         = False
             self.players[pid]["revealed_role"] = self.players[pid]["role"]
             deaths.add(pid)
 
     def _check_lover_deaths(self, dead_ids: set) -> set:
+        """
+        Vérifie si des amoureux doivent mourir de chagrin suite aux décès donnés et les tue.
+
+        :param dead_ids: Ensemble des identifiants des joueurs déjà morts (set).
+        :return: Ensemble des nouveaux décès causés par la règle des amoureux (set).
+        """
         new_deaths = set()
         for pid in list(dead_ids):
             if self.players[pid].get("is_lover"):
@@ -829,6 +999,11 @@ class WerewolfSoloGame:
         return new_deaths
 
     def _check_wild_child_conversion(self, dead_ids: set):
+        """
+        Convertit l'Enfant sauvage en loup si son mentor figure parmi les joueurs morts.
+
+        :param dead_ids: Ensemble des identifiants des joueurs morts ce tour (set).
+        """
         for p in self.players:
             if (p["alive"]
                     and p["role"] == "Enfant sauvage"
@@ -840,6 +1015,12 @@ class WerewolfSoloGame:
                               False)
 
     def _all_deaths_from(self, initial: set) -> set:
+        """
+        Calcule l'ensemble complet des morts en propageant les effets en chaîne (amoureux, Enfant sauvage).
+
+        :param initial: Ensemble des décès initiaux (set).
+        :return: Ensemble étendu de tous les joueurs morts après propagation (set).
+        """
         all_dead = set(initial)
         chain = self._check_lover_deaths(initial)
         all_dead |= chain
@@ -850,6 +1031,7 @@ class WerewolfSoloGame:
         return all_dead
 
     def _resolve_night(self):
+        """Applique toutes les actions nocturnes (loups, poison, feu), propage les morts en chaîne et déclenche les Chasseurs."""
         deaths: set = set()
         salvateur_protected = self.pending_night.get("salvateur_protected")
 
@@ -913,6 +1095,7 @@ class WerewolfSoloGame:
             self._continue_after_night()
 
     def _continue_after_night(self):
+        """Vérifie les conditions de victoire après la nuit et démarre la phase de jour ou la fin de partie."""
         # Vérifier victoire Pyromane (si tout le monde est mort via ignition)
         alive_others = [p for p in self.players
                         if p["alive"] and p["role"] == "Pyromane"]
@@ -947,6 +1130,12 @@ class WerewolfSoloGame:
         self._start_day()
 
     def _trigger_hunter(self, hunter_id: int, on_done):
+        """
+        Déclenche l'action du Chasseur mort : si humain, attend sa sélection ; si IA, choisit une cible aléatoire.
+
+        :param hunter_id: Indice du Chasseur dans la liste des joueurs (int).
+        :param on_done: Callback à appeler une fois l'action terminée (callable).
+        """
         hunter = self.players[hunter_id]
         if hunter["id"] == self.player_id:
             self.hunter_pending      = True
@@ -977,6 +1166,7 @@ class WerewolfSoloGame:
     # ── Phase de jour ─────────────────────────────────────────────────────────
 
     def _start_day(self):
+        """Démarre la phase de jour : fait parler quelques joueurs IA avant d'ouvrir le vote."""
         self.is_animating = True
         t = 0
         ai_speakers = [p for p in self.players if p["alive"] and p["id"] != self.player_id]
@@ -991,6 +1181,7 @@ class WerewolfSoloGame:
         self.schedule(t, self._open_vote)
 
     def _open_vote(self):
+        """Ouvre la phase de vote : demande au joueur humain de voter ou déclenche les votes IA s'il est mort."""
         self.message = "C'est l'heure du vote ! Qui est le loup ?"
         if not self.current_player()["alive"]:
             self.add_chat("Système", "Tu es éliminé. Le village vote sans toi.", False)
@@ -1001,6 +1192,7 @@ class WerewolfSoloGame:
             self.is_animating = False
 
     def _ai_votes(self):
+        """Planifie les votes des joueurs IA selon leur rôle (loups coordonnés, Voyante informée, autres aléatoires)."""
         self.is_animating = True
         t = 0
         ai_voters = [p for p in self.players
@@ -1071,6 +1263,7 @@ class WerewolfSoloGame:
         self.schedule(t + 500, self._resolve_day)
 
     def _resolve_day(self):
+        """Dépouillement des votes : désigne la cible majoritaire et planifie son élimination."""
         for p in self.players:
             if p["alive"] and p["id"] not in self.day_votes:
                 tid = self.random_target(exclude=p["id"])
@@ -1092,6 +1285,11 @@ class WerewolfSoloGame:
         self.schedule(2400, lambda c=chosen: self._apply_day_result(c))
 
     def _apply_day_result(self, chosen: int):
+        """
+        Applique l'élimination du joueur choisi par vote, propage les morts en chaîne et vérifie la victoire.
+
+        :param chosen: Indice du joueur éliminé par le vote (int).
+        """
         deaths = set()
         self._apply_death(chosen, deaths)
         role_reveal = self.players[chosen]["role"]
@@ -1136,6 +1334,11 @@ class WerewolfSoloGame:
             self._check_winner_day(chosen)
 
     def _check_winner_day(self, chosen: int):
+        """
+        Vérifie la condition de victoire après l'élimination diurne et démarre la nuit suivante si la partie continue.
+
+        :param chosen: Indice du joueur éliminé par vote (int).
+        """
         self.winner = check_winner(self.players)
         if self.winner:
             self.phase   = "end"
@@ -1153,6 +1356,7 @@ class WerewolfSoloGame:
     # ── Actions humaines ──────────────────────────────────────────────────────
 
     def apply_human_action(self):
+        """Traite l'action du joueur humain selon l'état courant (vote, action de nuit, Chasseur, Cupidon, etc.)."""
         # Chasseur
         if self.hunter_pending:
             if self.selected_target is None:
@@ -1323,6 +1527,7 @@ class WerewolfSoloGame:
             self._resume_after_human()
 
     def save_victim(self):
+        """Sorcière humaine : utilise la potion de soin pour sauver la victime des loups cette nuit."""
         if self.current_role() != "Sorcière" or self.phase != "night":
             return
         wolf_tgt = self.pending_night.get("wolf_target")
@@ -1335,6 +1540,7 @@ class WerewolfSoloGame:
         self._resume_after_human()
 
     def skip_action(self):
+        """Passe l'action nocturne du joueur humain (Sorcière, Sirène, Pyromane, Renard ou Salvateur)."""
         role = self.current_role()
         if self.phase == "night":
             if role == "Sorcière":
@@ -1386,6 +1592,11 @@ class WerewolfSoloGame:
     # ── Narration fin de partie ───────────────────────────────────────────────
 
     def _build_narrative(self) -> str:
+        """
+        Construit et retourne le texte narratif de fin de partie (rôles clés, première victime, vainqueur).
+
+        :return: Paragraphe descriptif de la partie (str).
+        """
         wolves = [p for p in self.players if is_wolf_player(p)]
         seer   = next((p for p in self.players if p["role"] == "Voyante"), None)
         witch  = next((p for p in self.players if p["role"] == "Sorcière"), None)
@@ -1442,6 +1653,7 @@ class WerewolfSoloGame:
     # ── Écran de fin détaillé ────────────────────────────────────────────────
 
     def _draw_end_screen(self):
+        """Dessine l'écran de fin de partie : overlay, titre du vainqueur, cartes de rôles et narration."""
         w, h = self.screen.get_size()
         f = self.fonts()
 
@@ -1565,6 +1777,7 @@ class WerewolfSoloGame:
     # ── Dessin ────────────────────────────────────────────────────────────────
 
     def _draw_background(self):
+        """Dessine le fond animé de la scène (ciel jour/nuit, soleil ou lune, étoiles, arbres, particules)."""
         w, h = self.screen.get_size()
         is_day = (self.phase == "day")
         if is_day:
@@ -1597,6 +1810,13 @@ class WerewolfSoloGame:
         self.particles.draw(self.screen)
 
     def _player_row(self, p: dict, rect: pygame.Rect, selected: bool):
+        """
+        Dessine la ligne d'un joueur dans la liste (badge de rôle, nom, icônes de statut, indicateur mort/vivant).
+
+        :param p: Dictionnaire d'état du joueur (dict).
+        :param rect: Rectangle de dessin sur la surface (pygame.Rect).
+        :param selected: True si ce joueur est la cible sélectionnée (bool).
+        """
         is_dead = not p["alive"]
         is_me   = (p["id"] == self.player_id)
         bg = (14, 10, 26) if is_dead else ((58, 36, 88) if selected else (26, 18, 46))
@@ -1657,6 +1877,7 @@ class WerewolfSoloGame:
                       topleft=(rect.right - 38, rect.y + 5))
 
     def draw_player_list(self):
+        """Dessine le panneau gauche listant tous les joueurs avec leur statut et rôle révélé."""
         f = self.fonts()
         draw_glass_panel(self.screen, self.left_rect, radius=22)
         draw_text(self.screen, "Joueurs", f["big"], MOON_SILVER,
@@ -1681,6 +1902,7 @@ class WerewolfSoloGame:
             y += row_h + 6
 
     def draw_info_panel(self):
+        """Dessine le panneau droit avec phase, rôle du joueur, message, journal de nuit, chat et boutons d'action."""
         f  = self.fonts()
         is_day = (self.phase == "day")
         rw     = self.right_rect.width - 40
@@ -1866,6 +2088,7 @@ class WerewolfSoloGame:
                 self.btn_vote.draw(self.screen, f["small"], mouse, enabled=can_act)
 
     def draw(self):
+        """Orchestre le dessin complet de la frame : fond, barre de titre, liste des joueurs et panneau d'info."""
         self._draw_background()
         f = self.fonts()
         draw_glass_panel(self.screen, self.top_rect, radius=18)
@@ -1894,6 +2117,11 @@ class WerewolfSoloGame:
     # ── Événements ───────────────────────────────────────────────────────────
 
     def handle_event(self, event):
+        """
+        Traite un événement Pygame (redimensionnement, clic souris) et dispatche vers les actions appropriées.
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         if event.type == pygame.VIDEORESIZE:
             self.screen = pygame.display.set_mode(
                 (max(MIN_W, event.w), max(MIN_H, event.h)), pygame.RESIZABLE)
@@ -1985,6 +2213,7 @@ class WerewolfSoloGame:
     # ── Boucle principale ────────────────────────────────────────────────────
 
     def run(self):
+        """Boucle principale : met à jour la logique, traite les événements et dessine chaque frame."""
         while self.running:
             dt = self.clock.tick(FPS)
             self.t += dt * 0.001

@@ -73,6 +73,13 @@ NIGHT_STEP_INFO = [
 
 class NetworkClient:
     def __init__(self, host: str, player_name: str, port: int = 5555):
+        """
+        Ouvre la connexion TCP, démarre le thread de réception et envoie le message de connexion.
+
+        :param host: Adresse IP du serveur (str).
+        :param player_name: Pseudonyme du joueur à envoyer au serveur (str).
+        :param port: Port TCP du serveur (int), 5555 par défaut.
+        """
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(8)
         self.sock.connect((host, port))
@@ -103,18 +110,29 @@ class NetworkClient:
             self.running = False
 
     def send(self, payload: dict):
+        """
+        Sérialise payload en JSON et l'envoie au serveur (terminé par '\\n').
+
+        :param payload: Dictionnaire à envoyer (dict).
+        """
         try:
             self.sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         except OSError:
             self.running = False
 
     def pop_messages(self) -> list:
+        """
+        Retourne et vide la file des messages reçus de manière thread-safe.
+
+        :return: list[dict] — messages JSON reçus depuis le dernier appel.
+        """
         with self.lock:
             msgs = self.messages[:]
             self.messages.clear()
         return msgs
 
     def close(self):
+        """Ferme proprement la connexion TCP et arrête le thread de réception."""
         self.running = False
         try:
             self.sock.close()
@@ -126,6 +144,12 @@ class NetworkClient:
 
 class WerewolfOnlineGame:
     def __init__(self, host: str, player_name: str):
+        """
+        Initialise la fenêtre, le client réseau, tous les boutons/champs et l'état local synchronisé depuis le serveur.
+
+        :param host: Adresse IP du serveur à rejoindre (str).
+        :param player_name: Pseudonyme du joueur local (str).
+        """
         pygame.init()
         self.screen = pygame.display.set_mode((BASE_W, BASE_H), pygame.RESIZABLE)
         pygame.display.set_caption("Loup-Garou - En ligne")
@@ -220,10 +244,16 @@ class WerewolfOnlineGame:
     # ── Fonts / Layout ───────────────────────────────────────────────────────
 
     def fonts(self) -> dict:
+        """
+        Retourne le dictionnaire de polices mises à l'échelle selon la taille courante de la fenêtre.
+
+        :return: dict avec les clés 'title', 'big', 'medium', 'small', 'xs'.
+        """
         w, h = self.screen.get_size()
         return scaled_fonts(w, h, BASE_W, BASE_H)
 
     def compute_layout(self):
+        """Recalcule les rectangles de toutes les zones et repositionne tous les boutons selon la taille courante."""
         w, h = self.screen.get_size()
         pad = 16
         self.top_rect    = pygame.Rect(pad, pad, w - pad * 2, 66)
@@ -304,6 +334,7 @@ class WerewolfOnlineGame:
     # ── Accesseurs ───────────────────────────────────────────────────────────
 
     def current_role(self):
+        """Retourne le rôle du joueur local ou None si non encore assigné."""
         if self.your_id is None:
             return None
         for p in self.players:
@@ -312,11 +343,13 @@ class WerewolfOnlineGame:
         return None
 
     def is_host(self) -> bool:
+        """Retourne True si le joueur local est l'hôte de la partie."""
         return self.your_id is not None and self.your_id == self.host_id
 
     # ── Réseau ───────────────────────────────────────────────────────────────
 
     def process_network(self):
+        """Traite tous les messages réseau reçus depuis le serveur et met à jour l'état local en conséquence."""
         for msg in self.network.pop_messages():
             mt = msg.get("type")
             if mt == "state_sync":
@@ -391,6 +424,12 @@ class WerewolfOnlineGame:
                 self.message = msg.get("message", self.message)
 
     def _send_role_config_update(self, role_name: str, delta: int):
+        """
+        Envoie au serveur une mise à jour du nombre d'exemplaires d'un rôle (hôte uniquement).
+
+        :param role_name: Nom du rôle à modifier (str).
+        :param delta: Variation souhaitée (+1 ou -1) (int).
+        """
         if not self.is_host() or self.phase != "lobby":
             return
         if role_name == "Villageois":
@@ -416,6 +455,11 @@ class WerewolfOnlineGame:
             self.network.send({"type": "update_role_config", "role_config": new})
 
     def _send_max_players_update(self, delta: int):
+        """
+        Envoie au serveur une mise à jour du nombre maximum de joueurs du salon (hôte uniquement).
+
+        :param delta: Variation souhaitée (+1 ou -1) (int).
+        """
         if not self.is_host() or self.phase != "lobby":
             return
         req = min_players_for_config(self.role_config)
@@ -464,57 +508,71 @@ class WerewolfOnlineGame:
                 self.selected_target = None
 
     def send_witch_save(self):
+        """Envoie l'action de soin de la Sorcière au serveur."""
         self.network.send({"type": "night_action", "action": "witch_save"})
 
     def send_witch_poison(self):
+        """Envoie l'action d'empoisonnement de la Sorcière sur la cible sélectionnée."""
         if self.selected_target is not None:
             self.network.send({"type": "night_action", "action": "witch_poison",
                                "target": self.selected_target})
             self.selected_target = None
 
     def send_witch_skip(self):
+        """Envoie le passage de tour de la Sorcière au serveur."""
         self.network.send({"type": "night_action", "action": "witch_skip"})
 
     def send_father_infect(self):
+        """Envoie l'action d'infection du Père des loups sur la victime des loups."""
         self.network.send({"type": "night_action", "action": "father_infect"})
 
     def send_father_skip(self):
+        """Envoie le passage de tour du Père des loups au serveur."""
         self.network.send({"type": "night_action", "action": "father_skip"})
 
     def send_salvateur_skip(self):
+        """Envoie le passage de tour du Salvateur au serveur."""
         self.network.send({"type": "night_action", "action": "salvateur_skip"})
 
     def send_siren_skip(self):
+        """Envoie le passage de tour de la Sirène au serveur."""
         self.network.send({"type": "night_action", "action": "siren_skip"})
 
     def send_arsonist_ignite(self):
+        """Envoie l'action d'ignition du Pyromane (brûle tous les aspergés) au serveur."""
         self.network.send({"type": "night_action", "action": "arsonist_ignite"})
 
     def send_arsonist_skip(self):
+        """Envoie le passage de tour du Pyromane au serveur."""
         self.network.send({"type": "night_action", "action": "arsonist_skip"})
 
     def send_fox_sense(self):
+        """Envoie l'action de flair du Renard sur les 3 joueurs sélectionnés au serveur."""
         if len(self.multi_select_list) == 3:
             self.network.send({"type": "night_action", "action": "fox_sense",
                                "targets": list(self.multi_select_list)})
             self.multi_select_list = []
 
     def send_fox_skip(self):
+        """Envoie le passage de tour du Renard au serveur."""
         self.network.send({"type": "night_action", "action": "fox_skip"})
 
     def send_cupidon_confirm(self):
+        """Envoie la confirmation des 2 amoureux choisis par Cupidon au serveur."""
         if len(self.multi_select_list) == 2:
             self.network.send({"type": "night_action", "action": "cupidon_choose",
                                "targets": list(self.multi_select_list)})
             self.multi_select_list = []
 
     def send_hunter_shoot(self):
+        """Envoie la cible du Chasseur (joueur qu'il emporte dans la mort) au serveur."""
         if self.selected_target is not None:
             self.network.send({"type": "night_action", "action": "hunter_shoot",
                                "target": self.selected_target})
             self.selected_target = None
 
     def send_chat(self):
+        """Envoie le message saisi dans le champ de chat au serveur."""
         txt = self.chat_input.consume()
         if txt:
             self.network.send({"type": "chat_message", "message": txt})
@@ -522,6 +580,7 @@ class WerewolfOnlineGame:
     # ── Fond animé ───────────────────────────────────────────────────────────
 
     def _draw_bg(self):
+        """Dessine le fond animé jour ou nuit (dégradé, astre, silhouettes d'arbres, particules)."""
         w, h = self.screen.get_size()
         is_day = (self.phase == "day")
         if is_day:
@@ -551,6 +610,7 @@ class WerewolfOnlineGame:
     # ── Liste joueurs ────────────────────────────────────────────────────────
 
     def draw_player_list(self):
+        """Dessine le panneau gauche avec la liste des joueurs, leur statut, rôle révélé et icônes d'état."""
         f = self.fonts()
         draw_glass_panel(self.screen, self.left_rect, radius=22)
         draw_text(self.screen, "Joueurs", f["big"], MOON_SILVER,
@@ -628,6 +688,12 @@ class WerewolfOnlineGame:
     # ── Panneau Lobby ────────────────────────────────────────────────────────
 
     def draw_player_count_selector(self, rect: pygame.Rect, f: dict):
+        """
+        Dessine le sélecteur de nombre maximum de joueurs du salon avec flèches de navigation.
+
+        :param rect: Rectangle de dessin alloué au widget (pygame.Rect).
+        :param f: Dictionnaire des polices (dict).
+        """
         draw_text(self.screen, "Joueurs dans le salon", f["medium"], MOON_SILVER,
                   topleft=(rect.x, rect.y + 4))
         pill = pygame.Rect(rect.x, rect.y + 36, rect.width, 44)
@@ -659,6 +725,12 @@ class WerewolfOnlineGame:
             draw_text(self.screen, sym, f["medium"], (10, 8, 22), center=r2.center)
 
     def draw_balance_bar(self, rect: pygame.Rect, f: dict):
+        """
+        Dessine la barre d'équilibre village/loups et le nombre de joueurs connectés.
+
+        :param rect: Rectangle de dessin alloué au widget (pygame.Rect).
+        :param f: Dictionnaire des polices (dict).
+        """
         bal = camp_balance(self.max_players, self.role_config)
         draw_text(self.screen, "Equilibre", f["medium"], MOON_SILVER,
                   topleft=(rect.x, rect.y + 2))
@@ -676,10 +748,20 @@ class WerewolfOnlineGame:
                   f["xs"], CYAN_COOL, topleft=(rect.x, rect.y + 54))
 
     def _villager_count(self) -> int:
+        """
+        Calcule le nombre de Villageois génériques restants après attribution des rôles spéciaux.
+
+        :return: Nombre de Villageois (int), toujours >= 0.
+        """
         special_count = sum(v for k, v in self.role_config.items() if k in AVAILABLE_ROLES)
         return max(0, self.max_players - special_count)
 
     def draw_role_rows(self, f: dict):
+        """
+        Dessine la liste défilante des rôles avec sections, compteurs et boutons +/- pour l'hôte.
+
+        :param f: Dictionnaire des polices (dict).
+        """
         self.role_row_rects   = {}
         self.role_minus_rects = {}
         self.role_plus_rects  = {}
@@ -786,6 +868,11 @@ class WerewolfOnlineGame:
             pygame.draw.rect(self.screen, CYAN_COOL, (bx, ty, 5, th), border_radius=3)
 
     def draw_role_info_popup(self, f: dict):
+        """
+        Affiche la popup de détail du rôle sélectionné (camp, aura, description).
+
+        :param f: Dictionnaire des polices (dict).
+        """
         if not self.show_role_info or not self.selected_role_name:
             return
         det = ROLE_CATALOG.get(self.selected_role_name)
@@ -814,6 +901,7 @@ class WerewolfOnlineGame:
             yl += 16
 
     def draw_lobby_panel(self):
+        """Dessine le panneau central du lobby (nom du salon, sélecteur de joueurs, équilibre, liste des rôles, bouton démarrer)."""
         f = self.fonts()
         draw_glass_panel(self.screen, self.center_rect, radius=22)
         draw_text(self.screen, self.server_name, f["big"], MOON_SILVER,
@@ -871,6 +959,7 @@ class WerewolfOnlineGame:
     # ── Panneau jeu ──────────────────────────────────────────────────────────
 
     def draw_game_panel(self):
+        """Dessine le panneau central de jeu (phase, rôle, cible, journal, boutons d'action ou écran de fin)."""
         f     = self.fonts()
         mouse = pygame.mouse.get_pos()
         is_day = (self.phase == "day")
@@ -1048,6 +1137,12 @@ class WerewolfOnlineGame:
     # ── Indicateur des étapes de nuit (2 rangées × 5) ────────────────────────
 
     def _draw_night_steps(self, f: dict, sy: int):
+        """
+        Dessine la barre d'indicateurs des étapes de nuit (Cupidon, Enfant sauvage, Loups, etc.).
+
+        :param f: Dictionnaire des polices (dict).
+        :param sy: Coordonnée y de départ de la rangée d'indicateurs (int).
+        """
         total_w = self.center_rect.width - 40
         n_per_row = 5
         pill_w = (total_w - (n_per_row - 1) * 4) // n_per_row
@@ -1073,6 +1168,12 @@ class WerewolfOnlineGame:
     # ── Boutons spécifiques aux rôles ────────────────────────────────────────
 
     def _draw_father_buttons(self, f: dict, mouse):
+        """
+        Affiche les boutons INFECTER et PASSER pour le Père des loups.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         infect_ok = self.father_can_infect and self.night_target_name is not None
         self.btn_father_infect.text = ("INFECTER " + (self.night_target_name or "")[:10]).strip()
         self.btn_father_skip.text   = "PASSER"
@@ -1085,6 +1186,12 @@ class WerewolfOnlineGame:
                   topleft=(self.btn_father_infect.rect.x, iy))
 
     def _draw_witch_buttons(self, f: dict, mouse):
+        """
+        Affiche les boutons SAUVER, EMPOISONNER et PASSER pour la Sorcière.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         save_ok   = (self.witch_heal_available and self.night_target_name is not None)
         poison_ok = (self.witch_poison_available and self.selected_target is not None)
         self.btn_save.text   = ("SAUVER " + (self.night_target_name or "")[:10]).strip()
@@ -1104,6 +1211,12 @@ class WerewolfOnlineGame:
                   topleft=(self.btn_poison.rect.x, iy))
 
     def _draw_salvateur_buttons(self, f: dict, mouse):
+        """
+        Affiche les boutons PROTEGER et PASSER pour le Salvateur.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         protect_ok = (self.selected_target is not None)
         self.btn_vote.text = "PROTEGER"
         self.btn_vote.draw(self.screen, f["xs"], mouse, enabled=protect_ok)
@@ -1115,6 +1228,12 @@ class WerewolfOnlineGame:
                       f["xs"], GREY_DIM, topleft=(self.btn_vote.rect.x, iy))
 
     def _draw_fox_buttons(self, f: dict, mouse):
+        """
+        Affiche les boutons SENTIR (3 cibles) et PASSER pour le Renard.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         n = len(self.multi_select_list)
         sense_ok = (n == 3)
         self.btn_fox_confirm.text = f"SENTIR ({n}/3)"
@@ -1127,6 +1246,12 @@ class WerewolfOnlineGame:
                   f["xs"], GOLD_PALE, topleft=(self.btn_fox_confirm.rect.x, iy))
 
     def _draw_siren_buttons(self, f: dict, mouse):
+        """
+        Affiche les boutons ENVOUTER et PASSER pour la Sirène.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         charm_ok = (self.selected_target is not None)
         self.btn_vote.text = "ENVOUTER"
         self.btn_vote.draw(self.screen, f["xs"], mouse, enabled=charm_ok)
@@ -1138,6 +1263,12 @@ class WerewolfOnlineGame:
                       f["xs"], (60, 140, 220), topleft=(self.btn_vote.rect.x, iy))
 
     def _draw_arsonist_buttons(self, f: dict, mouse):
+        """
+        Affiche les boutons ASPERGER, ENFLAMMER et PASSER pour le Pyromane.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         fuel_ok   = (self.selected_target is not None)
         ignite_ok = bool(self.fueled_list)
         self.btn_vote.text = "ASPERGER"
@@ -1152,6 +1283,12 @@ class WerewolfOnlineGame:
                       f["xs"], (220, 120, 20), topleft=(self.btn_vote.rect.x, iy))
 
     def _draw_hunter_buttons(self, f: dict, mouse):
+        """
+        Affiche le bouton TIRER pour le Chasseur qui doit désigner sa dernière victime.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         shoot_ok = (self.selected_target is not None)
         self.btn_hunter_shoot.text = "TIRER"
         self.btn_hunter_shoot.draw(self.screen, f["small"], mouse, enabled=shoot_ok)
@@ -1160,6 +1297,12 @@ class WerewolfOnlineGame:
                   f["xs"], WOLF_RED, topleft=(self.btn_hunter_shoot.rect.x, iy))
 
     def _draw_cupidon_buttons(self, f: dict, mouse):
+        """
+        Affiche le bouton CONFIRMER LES AMOUREUX (2 sélections requises) pour Cupidon.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         n = len(self.multi_select_list)
         confirm_ok = (n == 2)
         self.btn_cupidon_confirm.text = f"CONFIRMER LES AMOUREUX ({n}/2)"
@@ -1169,6 +1312,12 @@ class WerewolfOnlineGame:
                   f["xs"], GOLD_PALE, topleft=(self.btn_cupidon_confirm.rect.x, iy))
 
     def _draw_wild_child_buttons(self, f: dict, mouse):
+        """
+        Affiche le bouton CHOISIR CE MENTOR pour l'Enfant sauvage.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         ok = (self.selected_target is not None)
         self.btn_wild_confirm.text = "CHOISIR CE MENTOR"
         self.btn_wild_confirm.draw(self.screen, f["small"], mouse, enabled=ok)
@@ -1177,6 +1326,12 @@ class WerewolfOnlineGame:
                   f["xs"], GOLD_PALE, topleft=(self.btn_wild_confirm.rect.x, iy))
 
     def _draw_end_screen(self, f: dict, mouse):
+        """
+        Dessine l'écran de fin de partie avec le camp vainqueur, la liste des joueurs et le bouton Quitter.
+
+        :param f: Dictionnaire des polices (dict).
+        :param mouse: Position actuelle de la souris (tuple[int, int]).
+        """
         cr = self.center_rect
         win_colors = {
             "Village":  ((20, 44, 28, 230), (56, 140, 70, 200), (80, 220, 100), "VICTOIRE DU VILLAGE !"),
@@ -1225,6 +1380,7 @@ class WerewolfOnlineGame:
     # ── Chat ─────────────────────────────────────────────────────────────────
 
     def draw_chat_panel(self):
+        """Dessine le panneau de chat avec historique défilant, barre de scroll et zone de saisie."""
         f = self.fonts()
         draw_glass_panel(self.screen, self.chat_rect, radius=22)
         draw_text(self.screen, "Chat", f["big"], MOON_SILVER,
@@ -1284,6 +1440,7 @@ class WerewolfOnlineGame:
     # ── Draw principal ───────────────────────────────────────────────────────
 
     def draw(self):
+        """Orchestre le dessin complet de la frame : fond, barre titre, liste joueurs, panneau central et chat."""
         self._draw_bg()
         f = self.fonts()
 
@@ -1343,6 +1500,11 @@ class WerewolfOnlineGame:
         return False
 
     def handle_event(self, event):
+        """
+        Traite un événement Pygame (molette, redimensionnement, clic) et dispatche l'action appropriée.
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         if event.type == pygame.MOUSEWHEEL:
             pos = pygame.mouse.get_pos()
             if self.chat_rect.collidepoint(pos):
@@ -1515,6 +1677,7 @@ class WerewolfOnlineGame:
     # ── Boucle ───────────────────────────────────────────────────────────────
 
     def run(self):
+        """Boucle principale : traite le réseau, les événements et dessine chaque frame jusqu'à fermeture."""
         while self.running:
             dt = self.clock.tick(FPS)
             self.t += dt * 0.001

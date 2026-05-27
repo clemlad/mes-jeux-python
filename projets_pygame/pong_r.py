@@ -37,6 +37,12 @@ duree_special_rachid = 5400  # Valeur par défaut de 1h30
 parametres_partie = {}
 
 def saisir_nom(message, suivant):
+    """
+    Affiche un écran de saisie de texte pour enregistrer le nom d'un joueur.
+
+    :param message: Texte affiché comme invite de saisie (str), ex : 'Nom Joueur 1 : '.
+    :param suivant: Indique quel joueur est en cours de saisie (str) : 'joueur1' ou 'joueur2'.
+    """
     global nom_joueur1, nom_joueur2
     texte = ''
     while True:
@@ -76,6 +82,14 @@ def saisir_nom(message, suivant):
                     return
 
 def bouton_texte(texte, x, y):
+    """
+    Dessine un bouton avec texte sur la fenêtre et retourne son Rect pour la détection de clic.
+
+    :param texte: Label affiché sur le bouton (str).
+    :param x: Coordonnée horizontale du coin supérieur gauche (int).
+    :param y: Coordonnée verticale du coin supérieur gauche (int).
+    :return: pygame.Rect représentant la zone cliquable du bouton.
+    """
     surface = police.render(texte, True, noir)
     rect = pygame.Rect(x, y, surface.get_width() + 40, surface.get_height() + 20)
     pygame.draw.rect(fenetre, gris_clair, rect, border_radius=8)
@@ -83,6 +97,7 @@ def bouton_texte(texte, x, y):
     return rect
 
 def choisir_nombre_joueurs():
+    """Affiche le menu de sélection du nombre de joueurs (1 joueur contre IA ou 2 joueurs)."""
     global ia_active
     while True:
         fenetre.fill(noir)
@@ -110,6 +125,7 @@ def choisir_nombre_joueurs():
                     return
 
 def menu_special_rachid():
+    """Affiche le menu de sélection de la durée pour le mode Spécial Rachid (1h30, 3h ou 4h30)."""
     global temps_de_compte_a_rebours, mode_jeu, duree_special_rachid
     while True:
         fenetre.fill(noir)
@@ -148,6 +164,7 @@ def menu_special_rachid():
                     return
 
 def menu_mode():
+    """Affiche le menu principal de sélection du mode : Classique, Endurance ou Spécial Rachid."""
     global mode_jeu
     while True:
         fenetre.fill(noir)
@@ -180,6 +197,7 @@ def menu_mode():
                     sys.exit()
 
 def compte_a_rebours():
+    """Affiche une animation de compte à rebours 3-2-1-Go avant le début de la partie."""
     for i in range(3, 0, -1):
         fenetre.fill(noir)
         texte = police.render(str(i), True, blanc)
@@ -193,6 +211,7 @@ def compte_a_rebours():
     pygame.time.delay(700)
 
 def initialiser_partie():
+    """Réinitialise les scores, repositionne les raquettes et adapte le temps selon le mode de jeu."""
     global score1, score2, temps_restant, parametres_partie, raquette1, raquette2
     score1 = 0
     score2 = 0
@@ -214,6 +233,7 @@ def initialiser_partie():
     relancer_balle()
 
 def relancer_balle():
+    """Replace la balle au centre de l'écran et lui attribue une vitesse initiale aléatoire."""
     global balle, vitesse_balle_x, vitesse_balle_y, jeu_en_cours
     balle = pygame.Rect(largeur // 2 - 15, hauteur // 2 - 15, 30, 30)
     vitesse_balle_x = random.choice([-6, -5, 5, 6])
@@ -221,6 +241,7 @@ def relancer_balle():
     jeu_en_cours = True
 
 def augmenter_vitesse():
+    """Augmente la vitesse de la balle de 10 % après chaque rebond sur une raquette, plafonnée à 10."""
     global vitesse_balle_x, vitesse_balle_y
     vitesse_balle_x *= 1.10
     vitesse_balle_y *= 1.10
@@ -228,6 +249,7 @@ def augmenter_vitesse():
     vitesse_balle_y = math.copysign(min(abs(vitesse_balle_y), 10), vitesse_balle_y)
 
 def ia_move():
+    """Déplace la raquette de l'IA vers la balle si elle se dirige vers elle, sinon la recentre."""
     if vitesse_balle_x > 0:
         if raquette2.centery < balle.centery and raquette2.bottom < hauteur:
             raquette2.y += vitesse_ia
@@ -240,6 +262,7 @@ def ia_move():
             raquette2.y -= 4
 
 def verifier_victoire():
+    """Vérifie si les conditions de fin de partie sont atteintes et déclenche l'écran de victoire."""
     global jeu_en_cours
     if mode_jeu == "classique":
         if (score1 >= 11 or score2 >= 11) and abs(score1 - score2) >= 2:
@@ -267,6 +290,11 @@ def verifier_victoire():
                 afficher_victoire("Égalité !")
 
 def afficher_victoire(texte):
+    """
+    Affiche l'écran de fin de partie avec le message de victoire et les options Rejouer/Menu/Quitter.
+
+    :param texte: Message à afficher décrivant le résultat (str), ex : 'Joueur 1 a gagné !'.
+    """
     while True:
         fenetre.fill(noir)
         vic = police.render(texte, True, blanc)
@@ -292,6 +320,7 @@ def afficher_victoire(texte):
                     sys.exit()
 
 def restaurer_parametres():
+    """Restaure les paramètres de la partie précédente depuis le dictionnaire `parametres_partie`."""
     global mode_jeu, ia_active, nom_joueur1, nom_joueur2
     mode_jeu = parametres_partie.get('mode_jeu', "classique")
     ia_active = parametres_partie.get('ia_active', True)
@@ -299,6 +328,7 @@ def restaurer_parametres():
     nom_joueur2 = parametres_partie.get('nom_joueur2', "Joueur 2")
 
 def menu_pause():
+    """Affiche le menu de pause avec les options Reprendre, Menu principal et Quitter."""
     global pause
     while pause:
         fenetre.fill(noir)

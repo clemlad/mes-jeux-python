@@ -54,6 +54,13 @@ COL = {
 }
 
 def load_font(size, bold=False):
+    """
+    Charge et retourne une police de caractères Pygame.
+
+    :param size: Taille en pixels de la police (int).
+    :param bold: True pour une police en gras (bool).
+    :return: pygame.font.Font
+    """
     try:
         return pygame.font.SysFont("dejavusans", size, bold=bold)
     except:
@@ -77,6 +84,13 @@ class Suit(Enum):
     CLUB    = ("club",     "club",    COL["club"])
 
     def __init__(self, symbol, key, color):
+        """
+        Initialise l'enseigne avec son symbole Unicode, sa clé interne et sa couleur d'affichage.
+
+        :param symbol: Nom du symbole Unicode (str), ex : 'hearts'.
+        :param key: Clé interne de l'enseigne (str).
+        :param color: Couleur RGB d'affichage (tuple).
+        """
         self.symbol = symbol
         self.key    = key
         self.color  = color
@@ -104,6 +118,13 @@ class Rank(Enum):
     ACE   = (14, "A",  11)
 
     def __init__(self, rank_val, display, chip_val):
+        """
+        Initialise le rang de la carte avec sa valeur numérique, son affichage et sa valeur en chips.
+
+        :param rank_val: Valeur numérique du rang (int), ex : 14 pour l'As.
+        :param display: Chaîne affichée sur la carte (str), ex : 'A', 'K'.
+        :param chip_val: Nombre de chips apportés par cette carte (int).
+        """
         self.rank_val  = rank_val
         self.display   = display
         self.chip_val  = chip_val
@@ -121,6 +142,14 @@ class HandRank(Enum):
     ROYAL_FLUSH     = (10, "Quinte Flush Royale", 200, 10.0)
 
     def __init__(self, rank, name_fr, base_chips, multiplier):
+        """
+        Initialise un rang de main avec son ordre, son nom français, ses chips de base et son multiplicateur.
+
+        :param rank: Ordre de puissance de la main (int), 1 = carte haute, 10 = quinte flush royale.
+        :param name_fr: Nom français de la combinaison (str).
+        :param base_chips: Chips de base fournis par cette main (int).
+        :param multiplier: Multiplicateur de score de la main (float).
+        """
         self.rank_order  = rank
         self.name_fr     = name_fr
         self.base_chips  = base_chips
@@ -129,6 +158,11 @@ class HandRank(Enum):
 render_surf = pygame.Surface((W, H))
 
 def get_scale_offset():
+    """
+    Calcule le facteur d'échelle et le décalage pour centrer la surface de jeu dans la fenêtre.
+
+    :return: tuple (scale, ox, oy) — facteur d'échelle (float), décalage horizontal (float), décalage vertical (float).
+    """
     sw, sh = screen.get_size()
     scale = min(sw / W, sh / H)
     ox = (sw - W * scale) / 2
@@ -136,16 +170,30 @@ def get_scale_offset():
     return scale, ox, oy
 
 def screen_to_game(mx, my):
+    """
+    Convertit des coordonnées fenêtre en coordonnées de la surface de jeu logique.
+
+    :param mx: Coordonnée x dans la fenêtre (int).
+    :param my: Coordonnée y dans la fenêtre (int).
+    :return: tuple (gx, gy) — coordonnées en espace jeu (int, int).
+    """
     scale, ox, oy = get_scale_offset()
     return int((mx - ox) / scale), int((my - oy) / scale)
 
 _orig_mouse_get_pos = pygame.mouse.get_pos
 def _game_mouse_get_pos():
+    """Retourne la position de la souris convertie en coordonnées de l'espace jeu logique."""
     mx, my = _orig_mouse_get_pos()
     return screen_to_game(mx, my)
 pygame.mouse.get_pos = _game_mouse_get_pos
 
 def _patch_event_pos(event):
+    """
+    Remplace la position d'un événement Pygame par ses coordonnées en espace jeu.
+
+    :param event: Événement Pygame à patcher (pygame.event.Event).
+    :return: Événement avec position corrigée (pygame.event.Event).
+    """
     if hasattr(event, 'pos'):
         gx, gy = screen_to_game(event.pos[0], event.pos[1])
         d = event.__dict__.copy()
@@ -154,6 +202,7 @@ def _patch_event_pos(event):
     return event
 
 def toggle_fullscreen():
+    """Bascule l'affichage entre le mode plein écran et le mode fenêtré (1280×800)."""
     global screen, fullscreen
     fullscreen = not fullscreen
     if fullscreen:
@@ -163,6 +212,7 @@ def toggle_fullscreen():
 
 class BalatroBackground:
     def __init__(self):
+        """Initialise le fond animé : 12 orbes colorées, 120 étoiles et une grille de lignes."""
         self.time  = 0.0
         self.orbs  = [self._new_orb() for _ in range(12)]
         self.stars = [(random.randint(0,W), random.randint(0,H), random.uniform(0.3,1.0)) for _ in range(120)]
@@ -171,11 +221,13 @@ class BalatroBackground:
         for gy in range(0,H,48): pygame.draw.line(self._grid,(255,255,255,8),(0,gy),(W,gy))
 
     def _new_orb(self):
+        """Génère et retourne un dictionnaire décrivant une nouvelle orbe lumineuse aléatoire."""
         return {"x":random.uniform(0,W),"y":random.uniform(0,H),"r":random.uniform(60,180),
                 "vx":random.uniform(-0.3,0.3),"vy":random.uniform(-0.2,0.2),
                 "phase":random.uniform(0,math.tau),"hue":random.choice([(120,50,200),(60,20,140),(200,50,100),(40,100,200)])}
 
     def update(self):
+        """Avance l'animation d'une frame : déplace les orbes et les rebondit sur les bords."""
         self.time += 0.016
         for o in self.orbs:
             o["x"]+=o["vx"]; o["y"]+=o["vy"]
@@ -183,6 +235,11 @@ class BalatroBackground:
             if o["y"]<-200 or o["y"]>H+200: o["vy"]*=-1
 
     def draw(self, surf):
+        """
+        Dessine le fond animé (grille, orbes lumineuses, étoiles scintillantes, vignette) sur la surface donnée.
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        """
         surf.fill(COL["bg"]); surf.blit(self._grid,(0,0))
         orb=pygame.Surface((W,H),pygame.SRCALPHA)
         for o in self.orbs:
@@ -202,6 +259,19 @@ class BalatroBackground:
         surf.blit(vign,(0,0))
 
 def draw_text(surf, text, font, color, x, y, center=False, right=False):
+    """
+    Dessine du texte sur une surface et retourne son rectangle de rendu.
+
+    :param surf: Surface Pygame de destination (pygame.Surface).
+    :param text: Texte à afficher (str).
+    :param font: Police de caractères (pygame.font.Font).
+    :param color: Couleur RGB du texte (tuple).
+    :param x: Coordonnée x de référence (int).
+    :param y: Coordonnée y de référence (int).
+    :param center: Si True, centre horizontalement et verticalement autour de (x, y) (bool).
+    :param right: Si True, aligne le bord droit du texte sur x (bool).
+    :return: pygame.Rect — rectangle occupé par le texte.
+    """
     s=font.render(text,True,color); r=s.get_rect()
     if center: r.center=(x,y)
     elif right: r.right=x; r.top=y
@@ -209,33 +279,75 @@ def draw_text(surf, text, font, color, x, y, center=False, right=False):
     surf.blit(s,r); return r
 
 def draw_rect_rounded(surf, color, rect, radius=10, alpha=255):
+    """
+    Dessine un rectangle arrondi semi-transparent sur une surface.
+
+    :param surf: Surface Pygame de destination (pygame.Surface).
+    :param color: Couleur RGB du remplissage (tuple).
+    :param rect: Tuple (x, y, w, h) définissant le rectangle (tuple).
+    :param radius: Rayon des coins arrondis en pixels (int).
+    :param alpha: Transparence de 0 (invisible) à 255 (opaque) (int).
+    """
     s=pygame.Surface((rect[2],rect[3]),pygame.SRCALPHA)
     pygame.draw.rect(s,(*color,alpha),(0,0,rect[2],rect[3]),border_radius=radius)
     surf.blit(s,(rect[0],rect[1]))
 
 def draw_border(surf, color, rect, width=2, radius=10):
+    """
+    Dessine la bordure d'un rectangle arrondi.
+
+    :param surf: Surface Pygame de destination (pygame.Surface).
+    :param color: Couleur RGB de la bordure (tuple).
+    :param rect: Rectangle à border (pygame.Rect ou tuple).
+    :param width: Épaisseur de la bordure en pixels (int).
+    :param radius: Rayon des coins arrondis en pixels (int).
+    """
     pygame.draw.rect(surf,color,rect,width,border_radius=radius)
 
 def lerp_color(c1,c2,t):
+    """
+    Interpole linéairement entre deux couleurs RGB.
+
+    :param c1: Couleur de départ (tuple RGB).
+    :param c2: Couleur d'arrivée (tuple RGB).
+    :param t: Facteur d'interpolation entre 0.0 et 1.0 (float).
+    :return: Couleur interpolée (tuple RGB).
+    """
     return tuple(int(c1[i]+(c2[i]-c1[i])*t) for i in range(3))
 
 CARD_W, CARD_H = 72, 108
 
 class Card:
     def __init__(self, rank: Rank, suit: Suit):
+        """
+        Initialise une carte avec son rang et son enseigne.
+
+        :param rank: Rang de la carte (Rank).
+        :param suit: Enseigne de la carte (Suit).
+        """
         self.rank=rank; self.suit=suit
         self.selected=False; self.enhanced=False
         self._hover=False; self._anim_y=0.0
         self.is_joker_wildcard=False
 
     def __repr__(self):
+        """Retourne la représentation textuelle de la carte (ex : 'A♥')."""
         return f"{self.rank.display}{SUIT_SYMBOLS[self.suit.symbol]}"
 
     @property
     def chip_val(self):
+        """Retourne la valeur en chips de la carte, doublée si la carte est améliorée."""
         return self.rank.chip_val*(2 if self.enhanced else 1)
 
     def draw(self, surf, x, y, small=False):
+        """
+        Dessine la carte sur la surface à la position donnée.
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        :param x: Coordonnée x du coin supérieur gauche (int).
+        :param y: Coordonnée y du coin supérieur gauche (int).
+        :param small: Si True, utilise une taille réduite (bool).
+        """
         cw=CARD_W if not small else 52; ch=CARD_H if not small else 78
         ay=int(self._anim_y)
         draw_rect_rounded(surf,(0,0,0),(x+3,y+ay+3,cw,ch),8,120)
@@ -255,6 +367,13 @@ class Card:
             draw_border(surf,(200,200,100),(x-1,y+ay-1,cw+2,ch+2),1,9)
 
     def get_rect(self,x,y):
+        """
+        Retourne le rectangle de collision de la carte à la position donnée.
+
+        :param x: Coordonnée x de la carte (int).
+        :param y: Coordonnée y de la carte (int).
+        :return: pygame.Rect
+        """
         return pygame.Rect(x,y+int(self._anim_y),CARD_W,CARD_H)
 
 
@@ -262,15 +381,25 @@ class WildcardJokerCard(Card):
     TROLL_CHANCE = 0.03
 
     def __init__(self):
+        """Initialise la carte joker wildcard (As de cœur spécial, peut muter en troll)."""
         super().__init__(Rank.ACE, Suit.HEART)
         self.is_joker_wildcard=True; self.is_troll=False
 
     def check_troll_mutation(self):
+        """Teste aléatoirement une mutation en carte troll et retourne True si la mutation se produit."""
         if not self.is_troll and random.random()<self.TROLL_CHANCE:
             self.is_troll=True; return True
         return False
 
     def draw(self, surf, x, y, small=False):
+        """
+        Dessine la wildcard (version mystique ou troll selon l'état) sur la surface.
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        :param x: Coordonnée x (int).
+        :param y: Coordonnée y (int).
+        :param small: Si True, taille réduite (bool).
+        """
         cw=CARD_W if not small else 52; ch=CARD_H if not small else 78
         ay=int(self._anim_y)
         draw_rect_rounded(surf,(0,0,0),(x+3,y+ay+3,cw,ch),8,120)
@@ -281,6 +410,15 @@ class WildcardJokerCard(Card):
             draw_border(surf,hc,(x-1,y+ay-1,cw+2,ch+2),1,9)
 
     def _draw_wild(self, surf, x, y, cw, ch):
+        """
+        Dessine la carte dans son apparence wildcard mystique (fond violet, '?' et 'WILD').
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        :param x: Coordonnée x (int).
+        :param y: Coordonnée y (int).
+        :param cw: Largeur de la carte (int).
+        :param ch: Hauteur de la carte (int).
+        """
         bg=(230,200,255) if not self.selected else COL["card_sel"]
         draw_rect_rounded(surf,bg,(x,y,cw,ch),8)
         draw_border(surf,COL["mystique"],(x,y,cw,ch),3 if self.selected else 2,8)
@@ -290,6 +428,15 @@ class WildcardJokerCard(Card):
         draw_text(surf,"WILD",F["xs"],COL["mystique"],x+cw//2,y+ch-14,center=True)
 
     def _draw_troll(self, surf, x, y, cw, ch):
+        """
+        Dessine la carte dans son apparence troll (visage de gobelin vert).
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        :param x: Coordonnée x (int).
+        :param y: Coordonnée y (int).
+        :param cw: Largeur de la carte (int).
+        :param ch: Hauteur de la carte (int).
+        """
         draw_rect_rounded(surf,(20,45,20),(x,y,cw,ch),8)
         draw_border(surf,COL["troll"],(x,y,cw,ch),3,8)
         fx=x+cw//2; fy=y+ch//2-6
@@ -306,6 +453,13 @@ class WildcardJokerCard(Card):
         draw_text(surf,"XD",F["xs"],COL["troll"],x+cw//2,y+ch-14,center=True)
 
     def get_rect(self,x,y):
+        """
+        Retourne le rectangle de collision de la wildcard.
+
+        :param x: Coordonnée x (int).
+        :param y: Coordonnée y (int).
+        :return: pygame.Rect
+        """
         return pygame.Rect(x,y+int(self._anim_y),CARD_W,CARD_H)
 
 
@@ -313,10 +467,19 @@ class PoissonDegueulasse(Card):
     CURSE_CHANCE = 0.15
 
     def __init__(self):
+        """Initialise la carte Poisson Dégueulasse (2 de Trèfle spécial à effet négatif aléatoire)."""
         super().__init__(Rank.TWO, Suit.CLUB)
         self.is_poisson=True; self.is_joker_wildcard=False
 
     def draw(self, surf, x, y, small=False):
+        """
+        Dessine la carte Poisson Dégueulasse (petit poisson vert avec 'FORCE').
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        :param x: Coordonnée x (int).
+        :param y: Coordonnée y (int).
+        :param small: Si True, taille réduite (bool).
+        """
         cw=CARD_W if not small else 52; ch=CARD_H if not small else 78; ay=int(self._anim_y)
         draw_rect_rounded(surf,(0,0,0),(x+3,y+ay+3,cw,ch),8,120)
         bg=(180,210,160) if not self.selected else (220,255,180)
@@ -335,16 +498,25 @@ class PoissonDegueulasse(Card):
             draw_border(surf,(150,220,100),(x-1,y+ay-1,cw+2,ch+2),1,9)
 
     def get_rect(self,x,y):
+        """
+        Retourne le rectangle de collision du Poisson Dégueulasse.
+
+        :param x: Coordonnée x (int).
+        :param y: Coordonnée y (int).
+        :return: pygame.Rect
+        """
         return pygame.Rect(x,y+int(self._anim_y),CARD_W,CARD_H)
 
 
 class Deck:
     def __init__(self):
+        """Initialise le paquet de 52 cartes standard augmenté du Poisson Dégueulasse et réinitialise."""
         self._wildcard: Optional[WildcardJokerCard] = None
         self.cards: list[Card] = []
         self.reset()
 
     def reset(self):
+        """Reconstitue et mélange le paquet complet (52 cartes + wildcard si présente + Poisson)."""
         self.cards=[Card(r,s) for s in Suit for r in Rank]
         if self._wildcard is not None:
             new_wc=WildcardJokerCard()
@@ -355,10 +527,17 @@ class Deck:
         random.shuffle(self.cards)
 
     def add_wildcard(self):
+        """Ajoute une carte WildcardJokerCard au paquet et mélange."""
         wc=WildcardJokerCard(); self._wildcard=wc
         self.cards.append(wc); random.shuffle(self.cards)
 
     def draw(self, n=1) -> list[Card]:
+        """
+        Tire et retourne n cartes du dessus du paquet.
+
+        :param n: Nombre de cartes à tirer (int), 1 par défaut.
+        :return: list[Card] — cartes tirées (peut être vide si le paquet est épuisé).
+        """
         result=[]
         for _ in range(n):
             if self.cards:
@@ -369,13 +548,24 @@ class Deck:
                 result.append(card)
         return result
 
-    def remaining(self): return len(self.cards)
-    def has_wildcard(self): return self._wildcard is not None
+    def remaining(self):
+        """Retourne le nombre de cartes restantes dans le paquet (int)."""
+        return len(self.cards)
+
+    def has_wildcard(self):
+        """Retourne True si une wildcard est présente dans le paquet."""
+        return self._wildcard is not None
 
 
 class HandEvaluator:
     @staticmethod
     def evaluate(cards: list[Card]) -> tuple[HandRank, list[Card]]:
+        """
+        Évalue la meilleure combinaison possible parmi les cartes données (avec wildcards).
+
+        :param cards: Liste des cartes à évaluer (list[Card]).
+        :return: tuple (HandRank, list[Card]) — rang de la meilleure main et cartes contributives.
+        """
         wildcards=[c for c in cards if isinstance(c,WildcardJokerCard)]
         normals=[c for c in cards if not isinstance(c,WildcardJokerCard)]
         if not wildcards: return HandEvaluator._eval(normals)
@@ -390,6 +580,12 @@ class HandEvaluator:
 
     @staticmethod
     def _eval(cards: list[Card]) -> tuple[HandRank, list[Card]]:
+        """
+        Évalue la combinaison d'une liste de cartes normales (sans wildcard).
+
+        :param cards: Liste de cartes normales (list[Card]).
+        :return: tuple (HandRank, list[Card]) — rang de la main et cartes contributives.
+        """
         if not cards: return HandRank.HIGH_CARD,[]
         sorted_c=sorted(cards,key=lambda c:c.rank.rank_val,reverse=True)
         ranks=[c.rank.rank_val for c in sorted_c]; suits=[c.suit for c in sorted_c]
@@ -422,6 +618,15 @@ class HandEvaluator:
 
     @staticmethod
     def score(hr: HandRank, scoring: list[Card], jokers: list, game_ref=None) -> tuple[int, float]:
+        """
+        Calcule le score (chips, multiplicateur) d'une main après application des jokers.
+
+        :param hr: Rang de la main évaluée (HandRank).
+        :param scoring: Cartes contributives au score (list[Card]).
+        :param jokers: Liste des jokers actifs du joueur (list[Joker]).
+        :param game_ref: Référence optionnelle à la partie pour stocker les effets troll (GameScreen ou None).
+        :return: tuple (chips, mult) — chips totaux (int) et multiplicateur final (float).
+        """
         chips=hr.base_chips; mult=hr.multiplier; troll_loss=0
         for c in scoring:
             if isinstance(c,WildcardJokerCard):
@@ -440,11 +645,32 @@ class HandEvaluator:
 # ──────────────────────────────────────────────
 class Joker:
     def __init__(self,name,desc,price,rarity):
+        """
+        Initialise un joker avec son nom, sa description, son prix et sa rareté.
+
+        :param name: Nom du joker (str).
+        :param desc: Description courte de l'effet (str).
+        :param price: Prix en or dans la boutique (int).
+        :param rarity: Rareté : 'Commun', 'Rare', 'Legendaire' ou 'Mystique' (str).
+        """
         self.name=name; self.desc=desc; self.price=price
         self.rarity=rarity; self.locked=False
-    def apply(self,c,m,h,s): return c,m
+
+    def apply(self,c,m,h,s):
+        """
+        Applique l'effet du joker et retourne les chips et multiplicateur modifiés.
+
+        :param c: Chips courants (int).
+        :param m: Multiplicateur courant (float).
+        :param h: Rang de la main jouée (HandRank).
+        :param s: Cartes contributives au score (list[Card]).
+        :return: tuple (chips, mult) après application de l'effet.
+        """
+        return c,m
+
     @property
     def color(self):
+        """Retourne la couleur RGB associée à la rareté du joker."""
         return {"Commun":COL["dim"],"Rare":COL["blue"],
                 "Legendaire":COL["gold"],"Mystique":COL["mystique"]}.get(self.rarity,COL["dim"])
 
@@ -501,25 +727,43 @@ class LeSage(Joker):
 class ShopItem:
     """Base pour les items speciaux du shop (non-jokers)."""
     def __init__(self,name,desc,price,rarity,icon="[?]"):
+        """
+        Initialise un item de boutique avec son nom, sa description, son prix, sa rareté et son icône.
+
+        :param name: Nom de l'item (str).
+        :param desc: Description de l'effet (str).
+        :param price: Prix en or (int).
+        :param rarity: Rareté : 'Commun', 'Rare', 'Legendaire' ou 'Mystique' (str).
+        :param icon: Texte court affiché comme icône (str).
+        """
         self.name=name; self.desc=desc; self.price=price
         self.rarity=rarity; self.icon=icon
 
     @property
     def color(self):
+        """Retourne la couleur RGB associée à la rareté de l'item."""
         return {"Commun":COL["dim"],"Rare":COL["blue"],
                 "Legendaire":COL["gold"],"Mystique":COL["mystique"]}.get(self.rarity,COL["dim"])
 
     def on_buy(self, player, deck):
-        """Appele quand le joueur achete cet item. Retourne un message."""
+        """
+        Appelé quand le joueur achète cet item ; applique l'effet et retourne un message de confirmation.
+
+        :param player: Instance du joueur (Player).
+        :param deck: Paquet de cartes courant (Deck).
+        :return: Message de confirmation (str).
+        """
         return "Achete !"
 
 
 class MainPlusItem(ShopItem):
     """Main+ : +1 main par round (permanent)."""
     def __init__(self):
+        """Initialise l'item Main+ (+1 main par round, prix 5, Rare)."""
         super().__init__("Main +","+1 main par round",5,"Rare","[+M]")
 
     def on_buy(self, player, deck):
+        """Incrémente le bonus de mains du joueur et retourne un message de confirmation."""
         player.bonus_hands+=1
         return "+1 main gagnee ! Vos prochains rounds auront une main de plus."
 
@@ -527,9 +771,11 @@ class MainPlusItem(ShopItem):
 class PoubellItem(ShopItem):
     """Poubelle : +1 defausse par round (permanent)."""
     def __init__(self):
+        """Initialise l'item Poubelle (+1 défausse par round, prix 4, Rare)."""
         super().__init__("Poubelle","+1 defausse par round",4,"Rare","[+D]")
 
     def on_buy(self, player, deck):
+        """Incrémente le bonus de défausses du joueur et retourne un message de confirmation."""
         player.bonus_discards+=1
         return "+1 defausse gagnee ! Vos prochains rounds auront une defausse de plus."
 
@@ -537,11 +783,13 @@ class PoubellItem(ShopItem):
 class LaRouletteItem(ShopItem):
     """La Roulette : injecte une WILDCARD dans le deck."""
     def __init__(self):
+        """Initialise l'item La Roulette (Mystique, prix 15, ajoute une WILDCARD au deck)."""
         super().__init__("La Roulette",
                          "Ajoute 1 WILDCARD\ndans votre deck.\nCombo universel\nx6.7 chips+mult\n3% -> TROLL !",
                          15,"Mystique","[~]")
 
     def on_buy(self, player, deck):
+        """Ajoute une WildcardJokerCard au deck du joueur et retourne un message."""
         deck.add_wildcard()
         return "WILDCARD ajoutee au deck ! Attention aux mutations..."
 
@@ -549,11 +797,13 @@ class LaRouletteItem(ShopItem):
 class BobTavernierItem(ShopItem):
     """BOB le tavernier : +1 slot joker + 3 refreshs gratuits/visite."""
     def __init__(self):
+        """Initialise l'item BOB le tavernier (Légendaire, prix 12, +1 slot joker et refreshs gratuits)."""
         super().__init__("BOB le tavernier",
                          "+1 slot joker\n(5->6)\n3 refreshs\ngratuits/visite",
                          12,"Legendaire","[B]")
 
     def on_buy(self, player, deck):
+        """Active BOB : porte le maximum de jokers à 6 et accorde 3 refreshs gratuits par visite."""
         player.has_bob=True
         player.max_jokers=6
         player.free_refreshes=3
@@ -618,6 +868,15 @@ def draw_shop_items(pool, n, player, deck):
 # ──────────────────────────────────────────────
 class Blind:
     def __init__(self,name,desc,target,reward,boss_type=None):
+        """
+        Initialise un palier (blind) avec son nom, sa description, son objectif et sa récompense.
+
+        :param name: Nom du palier (str).
+        :param desc: Description ou règle spéciale (str).
+        :param target: Score cible à atteindre (int).
+        :param reward: Or gagné en récompense (int).
+        :param boss_type: Type de boss ('limace', 'mur', 'sorciere', 'roi') ou None (str ou None).
+        """
         self.name=name; self.desc=desc; self.target=target
         self.reward=reward; self.boss_type=boss_type
 
@@ -641,6 +900,7 @@ BLINDS=[
 # ──────────────────────────────────────────────
 class Player:
     def __init__(self):
+        """Initialise le joueur avec 10 or, 4 mains, 3 défausses, aucun joker et aucun bonus."""
         self.money=10; self.jokers: list[Joker]=[]
         self.max_jokers=5; self.hands_left=4
         self.discards_left=3; self.hands_played=0
@@ -649,30 +909,62 @@ class Player:
         self.bonus_discards=0   # bonus permanent de defausses (Poubelle)
 
     def add_joker(self,j):
+        """
+        Ajoute un joker aux slots du joueur si la limite n'est pas atteinte.
+
+        :param j: Joker à ajouter (Joker).
+        :return: True si ajouté, False si les slots sont pleins (bool).
+        """
         if len(self.jokers)<self.max_jokers: self.jokers.append(j); return True
         return False
 
     def spend(self,n):
+        """
+        Dépense n pièces d'or si le joueur en a assez.
+
+        :param n: Montant à dépenser (int).
+        :return: True si la dépense est effectuée, False si fonds insuffisants (bool).
+        """
         if self.money>=n: self.money-=n; return True
         return False
 
-    def earn(self,n): self.money+=n
+    def earn(self,n):
+        """
+        Ajoute n pièces d'or au portefeuille du joueur.
+
+        :param n: Montant à gagner (int).
+        """
+        self.money+=n
 
 # ──────────────────────────────────────────────
 #  PARTICULES
 # ──────────────────────────────────────────────
 class Particle:
     def __init__(self,x,y,color,text=None):
+        """
+        Initialise une particule flottante (cercle ou texte) avec une vélocité aléatoire.
+
+        :param x: Position x initiale (int ou float).
+        :param y: Position y initiale (int ou float).
+        :param color: Couleur RGB (tuple).
+        :param text: Texte optionnel à afficher à la place du cercle (str ou None).
+        """
         self.x=x; self.y=y; self.vx=random.uniform(-1.5,1.5)
         self.vy=random.uniform(-3,-1); self.life=60; self.max=60
         self.color=color; self.text=text
         self.r=random.randint(3,7) if not text else 0
 
     def update(self):
+        """Avance la particule d'une frame et retourne True tant qu'elle est vivante."""
         self.x+=self.vx; self.y+=self.vy; self.vy+=0.05; self.life-=1
         return self.life>0
 
     def draw(self,surf):
+        """
+        Dessine la particule (texte ou cercle semi-transparent) sur la surface.
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        """
         alpha=int(255*self.life/self.max)
         if self.text:
             s=F["sm"].render(self.text,True,self.color); s.set_alpha(alpha)
@@ -685,15 +977,28 @@ class Particle:
 
 class DiscardParticle:
     def __init__(self,card,x,y):
+        """
+        Initialise une particule d'animation de défausse (carte qui s'envole).
+
+        :param card: Carte défaussée à animer (Card).
+        :param x: Position x initiale (int).
+        :param y: Position y initiale (int).
+        """
         self.card=card; self.x=float(x); self.y=float(y)
         self.vx=random.uniform(-3,3); self.vy=random.uniform(-6,-3)
         self.life=35; self.max=35
 
     def update(self):
+        """Avance l'animation de la carte défaussée d'une frame et retourne True tant qu'elle est visible."""
         self.x+=self.vx; self.y+=self.vy; self.vy+=0.25; self.life-=1
         return self.life>0
 
     def draw(self,surf):
+        """
+        Dessine la carte défaussée en transparence décroissante.
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        """
         alpha=int(255*self.life/self.max)
         temp=pygame.Surface((CARD_W,CARD_H),pygame.SRCALPHA)
         pygame.draw.rect(temp,(*COL["card_w"],alpha),(0,0,CARD_W,CARD_H),border_radius=8)
@@ -707,11 +1012,27 @@ class DiscardParticle:
 
 class Button:
     def __init__(self,x,y,w,h,text,color=None,text_color=None):
+        """
+        Initialise un bouton interactif.
+
+        :param x: Position x du coin supérieur gauche (int).
+        :param y: Position y du coin supérieur gauche (int).
+        :param w: Largeur en pixels (int).
+        :param h: Hauteur en pixels (int).
+        :param text: Texte affiché sur le bouton (str).
+        :param color: Couleur de fond RGB (tuple ou None pour valeur par défaut).
+        :param text_color: Couleur du texte RGB (tuple ou None pour valeur par défaut).
+        """
         self.rect=pygame.Rect(x,y,w,h); self.text=text
         self.color=color or COL["btn"]; self.text_color=text_color or COL["white"]
         self.hover=False; self.disabled=False
 
     def draw(self,surf):
+        """
+        Dessine le bouton avec effet de survol et état désactivé.
+
+        :param surf: Surface Pygame de destination (pygame.Surface).
+        """
         c=COL["dim"] if self.disabled else (COL["btn_h"] if self.hover else self.color)
         draw_rect_rounded(surf,c,self.rect,8)
         draw_border(surf,(100,90,130) if not self.disabled else COL["dim"],self.rect,1,8)
@@ -722,8 +1043,22 @@ class Button:
             pygame.draw.rect(glow,(*self.color,60),(0,0,self.rect.w+8,self.rect.h+8),border_radius=10)
             surf.blit(glow,(self.rect.x-4,self.rect.y-4))
 
-    def update(self,mx,my): self.hover=self.rect.collidepoint(mx,my) and not self.disabled
+    def update(self,mx,my):
+        """
+        Met à jour l'état de survol selon la position de la souris.
+
+        :param mx: Coordonnée x de la souris (int).
+        :param my: Coordonnée y de la souris (int).
+        """
+        self.hover=self.rect.collidepoint(mx,my) and not self.disabled
+
     def clicked(self,event):
+        """
+        Retourne True si l'événement est un clic gauche sur ce bouton activé.
+
+        :param event: Événement Pygame (pygame.event.Event).
+        :return: bool
+        """
         return (event.type==pygame.MOUSEBUTTONDOWN and event.button==1
                 and self.rect.collidepoint(event.pos) and not self.disabled)
 
@@ -739,6 +1074,13 @@ CARD_SLOT_GAP= 14     # espace entre les cartes
 
 class ShopScreen:
     def __init__(self,player,deck,on_close):
+        """
+        Initialise l'écran de boutique avec les items tirés aléatoirement, les boutons de vente et de fermeture.
+
+        :param player: Instance du joueur courant (Player).
+        :param deck: Paquet de cartes courant (Deck).
+        :param on_close: Callback appelé à la fermeture de la boutique (callable).
+        """
         self.player=player; self.deck=deck; self.on_close=on_close
         self.items=[]   # liste d'items affiches (Joker ou ShopItem)
         self._refresh_items()
@@ -754,6 +1096,7 @@ class ShopScreen:
         self._ranim=0.0
 
     def _update_refresh_btn(self):
+        """Reconstruit le bouton de rafraîchissement selon le nombre de rafraîchissements gratuits restants."""
         btn_y=H-68
         if self.player.free_refreshes>0:
             label=f"Gratuit ({self.player.free_refreshes})"
@@ -764,10 +1107,12 @@ class ShopScreen:
         self.btn_refresh=Button(W//2-80, btn_y, 180, 44, label, col)
 
     def _refresh_items(self):
+        """Tire un nouvel ensemble d'items aléatoires depuis le pool et peuple la liste d'affichage."""
         pool=build_shop_pool(self.player,self.deck)
         self.items=draw_shop_items(pool, SHOP_SLOTS, self.player, self.deck)
 
     def _build_sell_buttons(self):
+        """Crée les boutons de vente sous chaque joker équipé du joueur (verrouillé ou non)."""
         self.btn_sell_all=[]
         for i,j in enumerate(self.player.jokers):
             bx=self._joker_slot_x(i)
@@ -786,9 +1131,20 @@ class ShopScreen:
         return pygame.Rect(x, CARD_SLOT_Y, CARD_SLOT_W, CARD_SLOT_H)
 
     def _joker_slot_x(self,i):
+        """
+        Calcule la coordonnée x du i-ème slot de joker affiché en bas de la boutique.
+
+        :param i: Indice du slot (int).
+        :return: Coordonnée x en pixels (int).
+        """
         return 30+i*165
 
     def handle(self,event):
+        """
+        Traite les événements Pygame dans la boutique (achats, ventes, rafraîchissement, fermeture).
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         mx,my=pygame.mouse.get_pos()
         self.btn_close.update(mx,my); self.btn_refresh.update(mx,my)
         for b in self.btn_sell_all: b.update(mx,my)
@@ -823,6 +1179,11 @@ class ShopScreen:
                     self._try_buy(i); return
 
     def _try_buy(self,i):
+        """
+        Tente l'achat de l'item à l'indice i : déduit l'argent, applique l'effet et retire l'item du shop.
+
+        :param i: Indice de l'item dans self.items (int).
+        """
         item=self.items[i]
         price=item.price if hasattr(item,'price') else 0
 
@@ -846,9 +1207,17 @@ class ShopScreen:
                 self.player.earn(price)
                 self._show_msg("Jokers pleins ! Vendez-en un.")
 
-    def _show_msg(self,m): self.msg=m; self.msg_timer=180
+    def _show_msg(self,m):
+        """
+        Affiche un message temporaire centré à l'écran dans la boutique.
 
-    def update(self): self._ranim+=0.05
+        :param m: Texte du message à afficher (str).
+        """
+        self.msg=m; self.msg_timer=180
+
+    def update(self):
+        """Met à jour l'animation de rotation utilisée pour les items spéciaux (Roulette, Bob)."""
+        self._ranim+=0.05
 
     def _draw_item_card(self, surf, item, r, hv):
         """Dessine un slot d'item du shop (joker ou item special)."""
@@ -944,6 +1313,11 @@ class ShopScreen:
             surf.blit(glow,(r.x-8,r.y-8))
 
     def draw(self,surf):
+        """
+        Dessine l'intégralité de l'écran boutique : items, jokers équipés, boutons et message temporaire.
+
+        :param surf: Surface Pygame sur laquelle dessiner (pygame.Surface).
+        """
         draw_rect_rounded(surf,COL["shop_bg"],(0,0,W,H),0)
         draw_text(surf,"* BOUTIQUE *",F["title"],COL["gold"],W//2,40,center=True)
         draw_text(surf,f"Argent: {self.player.money}$",F["big"],COL["green"],W//2,92,center=True)
@@ -1004,6 +1378,7 @@ class GameScreen:
     HAND_SIZE=8
 
     def __init__(self):
+        """Initialise une nouvelle partie : crée joueur, deck, état de jeu et lance le premier tour."""
         self.player=Player(); self.deck=Deck()
         self.hand: list[Card]=[]
         self.particles: list[Particle]=[]
@@ -1017,9 +1392,15 @@ class GameScreen:
         self._setup_round(); self._build_buttons()
         self.state="welcome"; self.bg=BalatroBackground()
 
-    def _current_blind(self): return BLINDS[self.ante][self.blind_idx]
+    def _current_blind(self):
+        """Retourne l'objet Blind correspondant au blind actuel (Ante + index).
+
+        :return: Instance de Blind en cours (Blind).
+        """
+        return BLINDS[self.ante][self.blind_idx]
 
     def _setup_round(self):
+        """Réinitialise le deck, pioche une nouvelle main et ajuste les compteurs de mains/défausses."""
         self.deck.reset()
         self.hand=self.deck.draw(self.HAND_SIZE)
         self.score=0; self.anim_score=0
@@ -1034,24 +1415,37 @@ class GameScreen:
                 break
 
     def _enforce_poisson(self):
+        """Force la sélection de toute carte PoissonDegueulasse présente dans la main."""
         for c in self.hand:
             if isinstance(c,PoissonDegueulasse):
                 c.selected=True
                 self._show_msg("~~ POISSON DEGUEULASSE en main ! Il sera joue de force ! ~~")
 
     def _build_buttons(self):
+        """Crée les boutons JOUER et DEFAUSSER positionnés en bas à droite de l'écran."""
         self.btn_play=Button(W-220,H-130,190,48,"JOUER",    COL["btn_play"],COL["white"])
         self.btn_disc=Button(W-220,H-72, 190,48,"DEFAUSSER",COL["btn_disc"],COL["white"])
 
-    def _selected(self): return [c for c in self.hand if c.selected]
+    def _selected(self):
+        """Retourne la liste des cartes sélectionnées dans la main courante.
+
+        :return: Liste de cartes sélectionnées (list[Card]).
+        """
+        return [c for c in self.hand if c.selected]
 
     def _toggle(self,card):
+        """
+        Sélectionne ou désélectionne une carte (max 5 à la fois ; le PoissonDegueulasse est ignoré).
+
+        :param card: Carte à basculer (Card ou sous-classe).
+        """
         if isinstance(card,PoissonDegueulasse): return
         sel=self._selected()
         if card.selected: card.selected=False
         elif len(sel)<5: card.selected=True
 
     def _play_hand(self):
+        """Joue les cartes sélectionnées, calcule le score, applique les jokers et les effets spéciaux."""
         sel=self._selected()
         if not sel: self._show_msg("Selectionnez des cartes !"); return
         if self.player.hands_left<=0: self._show_msg("Plus de mains !"); return
@@ -1118,6 +1512,7 @@ class GameScreen:
         self.result_timer=120; self.state="result"
 
     def _discard(self):
+        """Défausse les cartes sélectionnées (hors spéciales), lance les particules et pioche en remplacement."""
         sel=self._selected()
         if not sel: self._show_msg("Selectionnez des cartes !"); return
         if self.player.discards_left<=0: self._show_msg("Plus de defausses !"); return
@@ -1144,15 +1539,26 @@ class GameScreen:
         self.player.discards_left-=1
         self._enforce_poisson()
 
-    def _show_msg(self,m): self.msg=m; self.msg_timer=120
+    def _show_msg(self,m):
+        """
+        Affiche un message temporaire centré à l'écran en jeu.
+
+        :param m: Texte du message à afficher (str).
+        """
+        self.msg=m; self.msg_timer=120
 
     def _check_blind(self):
+        """Vérifie si le blind est gagné, perdu ou en cours.
+
+        :return: "win", "lose" ou "continue" (str).
+        """
         blind=self._current_blind()
         if self.score>=blind.target: return "win"
         if self.player.hands_left<=0: return "lose"
         return "continue"
 
     def _advance(self):
+        """Distribue la récompense du blind, passe au suivant et ouvre la boutique si nécessaire."""
         blind=self._current_blind()
         self.player.earn(blind.reward+self.player.money//5)
         self.blind_idx+=1
@@ -1162,9 +1568,16 @@ class GameScreen:
         self.shop_screen=ShopScreen(self.player,self.deck,self._after_shop)
         self.state="shop"
 
-    def _after_shop(self): self.state="playing"; self._setup_round()
+    def _after_shop(self):
+        """Callback de fermeture de la boutique : remet l'état en jeu et prépare un nouveau tour."""
+        self.state="playing"; self._setup_round()
 
     def handle(self,event):
+        """
+        Dispatch les événements Pygame selon l'état courant (welcome, shop, result, playing, etc.).
+
+        :param event: Événement Pygame à traiter (pygame.event.Event).
+        """
         if self.state=="welcome":
             if event.type in (pygame.MOUSEBUTTONDOWN,pygame.KEYDOWN): self.state="playing"
             return
@@ -1201,6 +1614,7 @@ class GameScreen:
             elif event.key==pygame.K_d: self._discard()
 
     def update(self):
+        """Met à jour chaque frame : fond animé, particules, hover des cartes et timers de messages."""
         self.bg.update()
         if self.anim_score<self.score:
             self.anim_score=min(self.score,self.anim_score+max(1,(self.score-self.anim_score)//8))
@@ -1218,6 +1632,11 @@ class GameScreen:
         if self.state=="shop" and self.shop_screen: self.shop_screen.update()
 
     def draw(self,surf):
+        """
+        Dessine l'état courant du jeu (welcome, boutique, game over, victoire ou partie en cours).
+
+        :param surf: Surface Pygame sur laquelle dessiner (pygame.Surface).
+        """
         self.bg.draw(surf)
         if self.state=="welcome": self._draw_welcome(surf); return
         if self.state=="shop": self.shop_screen.draw(surf); return
@@ -1289,6 +1708,11 @@ class GameScreen:
                 draw_text(surf,"Cliquez pour continuer",F["xs"],COL["dim"],cx_r,cy_r+ph//2+14,center=True)
 
     def _draw_welcome(self,surf):
+        """
+        Dessine l'écran de démarrage avec le titre, le sous-titre et les instructions.
+
+        :param surf: Surface Pygame sur laquelle dessiner (pygame.Surface).
+        """
         for off in [(2,2),(-2,-2),(2,-2),(-2,2)]:
             draw_text(surf,"BALTROU",F["title"],(60,10,80),W//2+off[0],H//2-80+off[1],center=True)
         draw_text(surf,"BALTROU",F["title"],COL["gold"],W//2,H//2-80,center=True)
@@ -1305,6 +1729,11 @@ class GameScreen:
                   F["xs"],COL["dim"],W//2,H//2+132,center=True)
 
     def _draw_gameover(self,surf):
+        """
+        Dessine l'écran de fin de partie (défaite) avec le score final et le bouton recommencer.
+
+        :param surf: Surface Pygame sur laquelle dessiner (pygame.Surface).
+        """
         draw_rect_rounded(surf,(10,6,18),(0,0,W,H),0,200)
         draw_text(surf,"GAME OVER",F["title"],COL["red"],W//2,H//2-60,center=True)
         draw_text(surf,f"Score final : {self.score:,}",F["big"],COL["white"],W//2,H//2+10,center=True)
@@ -1314,6 +1743,11 @@ class GameScreen:
         draw_text(surf,"Recommencer",F["med"],COL["white"],W//2,H//2+115,center=True)
 
     def _draw_victory(self,surf):
+        """
+        Dessine l'écran de victoire avec le score final et le bouton rejouer.
+
+        :param surf: Surface Pygame sur laquelle dessiner (pygame.Surface).
+        """
         draw_rect_rounded(surf,(6,18,10),(0,0,W,H),0,200)
         draw_text(surf,"VICTOIRE !",F["title"],COL["green"],W//2,H//2-60,center=True)
         draw_text(surf,f"Score final : {self.score:,}",F["big"],COL["gold"],W//2,H//2+10,center=True)

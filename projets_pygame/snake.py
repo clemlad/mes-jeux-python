@@ -29,6 +29,14 @@ WHITE = (255, 255, 255)
 # =========================
 class Snake:
     def __init__(self, play_left, play_top, grid_cols, grid_rows):
+        """
+        Initialise le serpent au centre de la grille avec une direction initiale vers la droite.
+
+        :param play_left: Coordonnée x gauche de la zone de jeu (int).
+        :param play_top: Coordonnée y haute de la zone de jeu (int).
+        :param grid_cols: Nombre de colonnes de la grille (int).
+        :param grid_rows: Nombre de lignes de la grille (int).
+        """
         start_x = play_left + (grid_cols // 2) * BLOCK_SIZE
         start_y = play_top + (grid_rows // 2) * BLOCK_SIZE
 
@@ -54,6 +62,7 @@ class Snake:
     # Déplacement / croissance
     # -------------------------
     def move(self):
+        """Avance le serpent d'une case dans la direction courante, en le faisant grandir si nécessaire."""
         self.dx, self.dy = self.next_dx, self.next_dy
 
         head_x, head_y = self.body[0]
@@ -66,9 +75,15 @@ class Snake:
             self.body.pop()
 
     def grow(self):
+        """Planifie l'ajout d'une case supplémentaire au serpent lors du prochain déplacement."""
         self.grow_pending += 1
 
     def change_direction(self, key):
+        """
+        Modifie la direction du serpent selon la touche pressée, en ignorant le demi-tour direct.
+
+        :param key: Code de touche Pygame (int), ex : pygame.K_UP, pygame.K_LEFT.
+        """
         if key == pygame.K_UP:
             ndx, ndy = 0, -BLOCK_SIZE
         elif key == pygame.K_DOWN:
@@ -90,6 +105,15 @@ class Snake:
     # Collisions
     # -------------------------
     def check_collision(self, play_left, play_right, play_top, play_bottom):
+        """
+        Retourne True si la tête du serpent sort de la zone de jeu ou percute son propre corps.
+
+        :param play_left: Borne gauche de la zone de jeu (int).
+        :param play_right: Borne droite de la zone de jeu (int).
+        :param play_top: Borne haute de la zone de jeu (int).
+        :param play_bottom: Borne basse de la zone de jeu (int).
+        :return: bool
+        """
         head = self.body[0]
 
         # Collision avec les murs
@@ -106,6 +130,11 @@ class Snake:
     # Affichage
     # -------------------------
     def draw(self, window):
+        """
+        Dessine le serpent sur la fenêtre avec dégradé de couleur : tête plus lumineuse, queue plus sombre.
+
+        :param window: Surface Pygame sur laquelle dessiner (pygame.Surface).
+        """
         r, g, b = self.base_color
 
         for i, block in enumerate(self.body):
@@ -137,6 +166,15 @@ class Snake:
 # =========================
 class Food:
     def __init__(self, snake, play_left, play_right, play_top, play_bottom):
+        """
+        Initialise une pomme à une position aléatoire libre dans la zone de jeu.
+
+        :param snake: Instance du serpent pour éviter de placer la pomme sur son corps (Snake).
+        :param play_left: Borne gauche de la zone de jeu (int).
+        :param play_right: Borne droite de la zone de jeu (int).
+        :param play_top: Borne haute de la zone de jeu (int).
+        :param play_bottom: Borne basse de la zone de jeu (int).
+        """
         self.snake = snake
         self.play_left = play_left
         self.play_right = play_right
@@ -148,6 +186,11 @@ class Food:
     # Positionnement
     # -------------------------
     def random_position(self):
+        """
+        Génère et retourne une position aléatoire alignée sur la grille, libre du corps du serpent.
+
+        :return: Tuple (x, y) de coordonnées pixel (tuple[int, int]).
+        """
         while True:
             pos = (
                 random.randrange(self.play_left, self.play_right, BLOCK_SIZE),
@@ -157,12 +200,18 @@ class Food:
                 return pos
 
     def respawn(self):
+        """Déplace la pomme vers une nouvelle position aléatoire libre."""
         self.position = self.random_position()
 
     # -------------------------
     # Affichage
     # -------------------------
     def draw(self, window):
+        """
+        Dessine la pomme sous forme de cercle rouge sur la fenêtre.
+
+        :param window: Surface Pygame sur laquelle dessiner (pygame.Surface).
+        """
         center = (
             self.position[0] + BLOCK_SIZE // 2,
             self.position[1] + BLOCK_SIZE // 2
@@ -175,6 +224,7 @@ class Food:
 # =========================
 class Game:
     def __init__(self):
+        """Initialise la fenêtre, les polices, les modes de jeu, les paramètres IA, le serpent et les pommes."""
         self.window = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Snake POO")
         self.clock = pygame.time.Clock()
@@ -250,6 +300,7 @@ class Game:
     # CONFIGURATION DU TERRAIN / MODE
     # ==========================================================
     def update_playfield_dimensions(self):
+        """Recalcule les dimensions et positions de la zone de jeu selon le mode actif, et régénère le cycle hamiltonien."""
         settings = self.mode_settings[self.game_mode]
 
         self.grid_cols, self.grid_rows = settings["grid"]
@@ -272,6 +323,11 @@ class Game:
         self.cycle_index = 0
 
     def create_foods(self):
+        """
+        Crée et retourne la liste des pommes selon le nombre défini par le mode de jeu.
+
+        :return: list[Food]
+        """
         return [
             Food(self.snake, self.play_left, self.play_right, self.play_top, self.play_bottom)
             for _ in range(self.food_count)
@@ -281,12 +337,27 @@ class Game:
     # GESTION DES VITESSES
     # ==========================================================
     def get_current_base_speed(self):
+        """
+        Retourne la vitesse de base du mode de jeu courant.
+
+        :return: int
+        """
         return self.mode_settings[self.game_mode]["base_speed"]
 
     def get_current_max_speed(self):
+        """
+        Retourne la vitesse maximale du mode de jeu courant.
+
+        :return: int
+        """
         return self.mode_settings[self.game_mode]["max_speed"]
 
     def get_tick_speed(self):
+        """
+        Retourne la cadence de jeu : vitesse IA (très rapide) si une IA est active, sinon la vitesse du joueur.
+
+        :return: int ou float
+        """
         if self.ai_mode or self.perfect_ai:
             return self.ai_test_speed
         return self.speed
@@ -295,6 +366,7 @@ class Game:
     # IA
     # ==========================================================
     def ai_choose_direction(self):
+        """Choisit pour l'IA la direction qui minimise la distance de Manhattan vers la première pomme, en évitant les murs et le corps."""
         if not self.foods:
             return
 
@@ -331,6 +403,11 @@ class Game:
             self.snake.next_dx, self.snake.next_dy = best_dir
 
     def generate_hamiltonian_cycle(self):
+        """
+        Génère un cycle hamiltonien en serpentin (boustrophédon) couvrant toute la grille.
+
+        :return: list[tuple[int, int]] — positions pixel dans l'ordre du cycle.
+        """
         path = []
 
         for y in range(self.grid_rows):
@@ -344,6 +421,7 @@ class Game:
         return path
 
     def perfect_ai_move(self):
+        """Déplace le serpent en suivant pas à pas le cycle hamiltonien, garantissant la victoire sans collision."""
         head = self.snake.body[0]
 
         if head in self.hamiltonian_cycle:
@@ -362,6 +440,7 @@ class Game:
     # AFFICHAGE : FONDS / TERRAIN / HUD
     # ==========================================================
     def draw_fullscreen_background(self):
+        """Dessine un fond plein écran avec dégradé vertical sombre et grille de lignes."""
         for y in range(HEIGHT):
             color = (8, 10 + y // 6, 18 + y // 8)
             pygame.draw.line(self.window, color, (0, y), (WIDTH, y))
@@ -372,18 +451,21 @@ class Game:
             pygame.draw.line(self.window, (35, 35, 45), (0, y), (WIDTH, y))
 
     def draw_gradient(self):
+        """Dessine un dégradé vertical sombre sur la zone de jeu uniquement."""
         for y in range(self.play_top, self.play_bottom):
             yy = y - self.play_top
             color = (10, 10 + yy // 4, 20 + yy // 6)
             pygame.draw.line(self.window, color, (self.play_left, y), (self.play_right, y))
 
     def draw_grid(self):
+        """Dessine les lignes de la grille de jeu sur la zone de jeu."""
         for x in range(self.play_left, self.play_right + 1, BLOCK_SIZE):
             pygame.draw.line(self.window, (40, 40, 40), (x, self.play_top), (x, self.play_bottom))
         for y in range(self.play_top, self.play_bottom + 1, BLOCK_SIZE):
             pygame.draw.line(self.window, (40, 40, 40), (self.play_left, y), (self.play_right, y))
 
     def draw_playfield_frame(self):
+        """Dessine le cadre extérieur et le fond intérieur sombre de la zone de jeu."""
         frame_rect = pygame.Rect(
             self.play_left - 4,
             self.play_top - 4,
@@ -399,6 +481,7 @@ class Game:
         )
 
     def draw_hud_glass(self):
+        """Dessine le HUD supérieur avec score, meilleur score, direction courante, mode, vitesse et nombre de pommes."""
         hud = pygame.Surface((WIDTH, HUD_HEIGHT))
         hud.fill((15, 15, 20))
 
@@ -464,6 +547,14 @@ class Game:
         self.window.blit(hud, (0, 0))
 
     def _draw_arrow_on(self, surface, x, y, direction):
+        """
+        Dessine une flèche triangulaire sur une surface donnée.
+
+        :param surface: Surface Pygame cible (pygame.Surface).
+        :param x: Position horizontale du coin supérieur gauche de la flèche (int).
+        :param y: Position verticale du coin supérieur gauche de la flèche (int).
+        :param direction: Direction de la flèche : 'up', 'down', 'left' ou 'right' (str).
+        """
         color = (255, 255, 255)
         size = 12
 
@@ -482,6 +573,13 @@ class Game:
     # AFFICHAGE : BOUTONS / MENUS
     # ==========================================================
     def draw_button(self, text, rect, hovered):
+        """
+        Dessine un bouton rectangulaire avec son texte centré, en changeant de couleur au survol.
+
+        :param text: Texte à afficher sur le bouton (str).
+        :param rect: Rectangle de position et dimensions du bouton (pygame.Rect).
+        :param hovered: True si la souris survole le bouton (bool).
+        """
         color = (70, 70, 70) if not hovered else (100, 100, 100)
         pygame.draw.rect(self.window, color, rect, border_radius=10)
 
@@ -495,6 +593,13 @@ class Game:
         )
 
     def draw_arrow(self, x, y, direction):
+        """
+        Dessine une flèche triangulaire directement sur la fenêtre principale.
+
+        :param x: Position horizontale de la flèche (int).
+        :param y: Position verticale de la flèche (int).
+        :param direction: Direction : 'up', 'down', 'left' ou 'right' (str).
+        """
         color = WHITE
         size = 12
 
@@ -510,6 +615,11 @@ class Game:
         pygame.draw.polygon(self.window, color, points)
 
     def draw_menu(self):
+        """
+        Dessine le menu principal avec le titre, le bouton Jouer, le mode actif, les flèches et les contrôles.
+
+        :return: pygame.Rect — rectangle du bouton Jouer.
+        """
         self.draw_fullscreen_background()
 
         center_x = WIDTH // 2
@@ -581,6 +691,7 @@ class Game:
         return button_rect
 
     def draw_countdown(self):
+        """Affiche un décompte 3-2-1 avant le début de la partie, puis lance la partie quand il atteint zéro."""
         self.draw_fullscreen_background()
 
         elapsed = (pygame.time.get_ticks() - self.countdown_start) // 1000
@@ -621,6 +732,7 @@ class Game:
         )
 
     def draw_pause(self):
+        """Affiche l'état de pause avec un overlay semi-transparent progressif et les options de reprise/menu/quitter."""
         self.window.fill(BLACK)
         self.draw_playfield_frame()
         self.draw_gradient()
@@ -658,6 +770,7 @@ class Game:
         self.window.blit(q_text, (center_x - q_text.get_width() // 2, start_y + 4 * line))
 
     def draw_game_over(self):
+        """Affiche l'écran de fin de partie avec le score, le meilleur score, la progression et les options de rejouer."""
         self.window.fill(BLACK)
 
         best = self.best_score()
@@ -691,6 +804,7 @@ class Game:
         self.window.blit(quit_text, (center_x - quit_text.get_width() // 2, start_y + 6 * line))
 
     def draw_win(self):
+        """Affiche l'écran de victoire quand le serpent remplit toute la grille, avec le score et les options."""
         self.window.fill(BLACK)
 
         title = self.big_font.render("TU AS GAGNÉ !", True, (0, 220, 0))
@@ -716,9 +830,19 @@ class Game:
     # SCORES / PROGRESSION
     # ==========================================================
     def best_score(self):
+        """
+        Retourne le meilleur score de toutes les parties jouées, ou 0 si aucune partie n'a été complétée.
+
+        :return: int
+        """
         return max(self.score_history) if self.score_history else 0
 
     def progression(self):
+        """
+        Retourne la différence entre le score de la dernière partie et le meilleur score précédent.
+
+        :return: int — positif si nouveau record, négatif si en dessous, 0 pour la première partie.
+        """
         if not self.score_history:
             return 0
         if len(self.score_history) < 2:
@@ -732,6 +856,7 @@ class Game:
     # GESTION DES ÉVÉNEMENTS
     # ==========================================================
     def handle_events(self):
+        """Traite tous les événements Pygame : clavier, souris, changement de mode, IA, pause, game over et victoire."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -821,6 +946,7 @@ class Game:
     # GAMEPLAY / UPDATE / RESET
     # ==========================================================
     def update(self):
+        """Met à jour la logique de jeu : déplace le serpent, vérifie les collisions, gère les pommes et la victoire."""
         if self.state != "PLAYING":
             return
 
@@ -855,6 +981,7 @@ class Game:
             self.state = "GAME_OVER"
 
     def reset(self):
+        """Réinitialise le serpent, le score, la vitesse et les pommes pour une nouvelle partie, et désactive les IA."""
         self.snake = Snake(self.play_left, self.play_top, self.grid_cols, self.grid_rows)
         self.score = 0
         self.speed = self.get_current_base_speed()
@@ -868,6 +995,7 @@ class Game:
     # BOUCLE PRINCIPALE / RENDU
     # ==========================================================
     def draw(self):
+        """Choisit et affiche l'écran correspondant à l'état courant : menu, décompte, jeu, pause, game over ou victoire."""
         if self.state == "MENU":
             self.play_button = self.draw_menu()
 
@@ -898,6 +1026,7 @@ class Game:
         pygame.display.update()
 
     def run(self):
+        """Lance la boucle principale du jeu : cadence, événements, mise à jour logique et rendu."""
         while self.running:
             self.clock.tick(self.get_tick_speed())
             self.handle_events()

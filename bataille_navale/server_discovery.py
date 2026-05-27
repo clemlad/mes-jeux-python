@@ -10,6 +10,11 @@ SERVER_TIMEOUT = 3.5
 
 
 def get_local_ip():
+    """
+    Retourne l'adresse IP locale de la machine en établissant une connexion UDP fictive.
+
+    :return: Adresse IP locale (str), ex : '192.168.1.5'. Retourne '127.0.0.1' en cas d'erreur.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
@@ -23,6 +28,13 @@ def get_local_ip():
 
 class ServerBroadcaster:
     def __init__(self, server_name, host_ip=None, game_port=GAME_PORT):
+        """
+        Initialise le broadcaster UDP qui annonce le serveur sur le réseau local.
+
+        :param server_name: Nom de la partie à diffuser (str).
+        :param host_ip: IP locale du serveur (str ou None pour autodétection).
+        :param game_port: Port TCP du jeu à diffuser (int), 5555 par défaut.
+        """
         self.server_name = server_name
         self.host_ip = host_ip or get_local_ip()
         self.game_port = game_port
@@ -32,9 +44,15 @@ class ServerBroadcaster:
         self.max_players = 2
 
     def set_player_count(self, count):
+        """
+        Met à jour le nombre de joueurs connectés diffusé dans les annonces.
+
+        :param count: Nombre de joueurs actuellement connectés (int).
+        """
         self.player_count = count
 
     def start(self):
+        """Démarre le thread de diffusion UDP si ce n'est pas déjà fait."""
         if self.running:
             return
         self.running = True
@@ -42,9 +60,11 @@ class ServerBroadcaster:
         self.thread.start()
 
     def stop(self):
+        """Arrête le thread de diffusion UDP."""
         self.running = False
 
     def _run(self):
+        """Boucle interne du thread : envoie un broadcast UDP toutes les DISCOVERY_INTERVAL secondes."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
@@ -72,12 +92,14 @@ class ServerBroadcaster:
 
 class ServerDiscovery:
     def __init__(self):
+        """Initialise le listener UDP pour découvrir les serveurs annoncés sur le réseau local."""
         self.running = False
         self.thread = None
         self.lock = threading.Lock()
         self.found_servers = {}  # key = (host, port)
 
     def start(self):
+        """Démarre le thread d'écoute UDP si ce n'est pas déjà fait."""
         if self.running:
             return
         self.running = True
@@ -85,9 +107,11 @@ class ServerDiscovery:
         self.thread.start()
 
     def stop(self):
+        """Arrête le thread d'écoute UDP."""
         self.running = False
 
     def _listen(self):
+        """Boucle interne du thread : écoute les broadcasts UDP et met à jour la liste des serveurs."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("", DISCOVERY_PORT))
@@ -139,6 +163,7 @@ class ServerDiscovery:
             sock.close()
 
     def _cleanup(self):
+        """Supprime les serveurs qui n'ont pas envoyé d'annonce depuis plus de SERVER_TIMEOUT secondes."""
         now = time.time()
         with self.lock:
             expired = [
@@ -149,6 +174,11 @@ class ServerDiscovery:
                 del self.found_servers[key]
 
     def get_servers(self):
+        """
+        Retourne la liste des serveurs actuellement détectés, triée par nom puis par adresse.
+
+        :return: list[dict] avec les clés 'name', 'host', 'port', 'players', 'max_players', 'last_seen'.
+        """
         with self.lock:
             servers = list(self.found_servers.values())
 

@@ -177,10 +177,22 @@ NIGHT_ORDER = [
 
 
 def role_details(role_name):
+    """
+    Retourne le dictionnaire de détails d'un rôle depuis le catalogue, ou les détails de Villageois si inconnu.
+
+    :param role_name: Nom du rôle recherché (str).
+    :return: dict avec les clés 'camp', 'aura', 'max', 'night_action', 'weight', 'description', 'ui_icon'.
+    """
     return ROLE_CATALOG.get(role_name, ROLE_CATALOG["Villageois"])
 
 
 def is_wolf_role(role_name):
+    """
+    Retourne True si le nom de rôle correspond à un rôle loup de base.
+
+    :param role_name: Nom du rôle à tester (str).
+    :return: bool
+    """
     return role_name in {"Loup-garou", "Infect Père des Loups"}
 
 
@@ -232,6 +244,12 @@ def check_winner(players):
 
 
 def normalize_role_config(role_config=None):
+    """
+    Retourne une configuration de rôles normalisée en appliquant les valeurs par défaut et en respectant les maximums.
+
+    :param role_config: Dict optionnel {nom_rôle: quantité} fourni par l'utilisateur (dict ou None).
+    :return: dict {nom_rôle: quantité} complet pour tous les rôles disponibles.
+    """
     config = {role: 0 for role in AVAILABLE_ROLES}
     for role, value in DEFAULT_ROLE_CONFIG.items():
         config[role] = value
@@ -247,6 +265,12 @@ def normalize_role_config(role_config=None):
 
 
 def configured_special_roles(role_config=None):
+    """
+    Retourne la liste aplatie des rôles spéciaux actifs selon la configuration (sans les Villageois de remplissage).
+
+    :param role_config: Dict optionnel {nom_rôle: quantité} (dict ou None).
+    :return: list[str] — liste des noms de rôles répétés selon leur quantité.
+    """
     config = normalize_role_config(role_config)
     roles = []
     for role in AVAILABLE_ROLES:
@@ -255,10 +279,23 @@ def configured_special_roles(role_config=None):
 
 
 def min_players_for_config(role_config=None):
+    """
+    Retourne le nombre minimum de joueurs requis pour la configuration donnée.
+
+    :param role_config: Dict optionnel {nom_rôle: quantité} (dict ou None).
+    :return: int
+    """
     return max(MIN_PLAYERS, len(configured_special_roles(role_config)))
 
 
 def role_config_error(player_count, role_config=None):
+    """
+    Retourne un message d'erreur si le nombre de joueurs est insuffisant pour la configuration, sinon None.
+
+    :param player_count: Nombre de joueurs dans la partie (int).
+    :param role_config: Dict optionnel {nom_rôle: quantité} (dict ou None).
+    :return: str ou None
+    """
     required = min_players_for_config(role_config)
     if player_count < required:
         return f"Il faut au moins {required} joueurs pour cette composition."
@@ -266,6 +303,13 @@ def role_config_error(player_count, role_config=None):
 
 
 def camp_balance(player_count, role_config=None):
+    """
+    Calcule et retourne les ratios de puissance Village/Loups pour la configuration donnée.
+
+    :param player_count: Nombre total de joueurs (int).
+    :param role_config: Dict optionnel {nom_rôle: quantité} (dict ou None).
+    :return: dict avec les clés 'village_ratio', 'wolves_ratio', 'counts' (float, float, dict).
+    """
     config = normalize_role_config(role_config)
     wolf_power    = 0.0
     village_power = 0.0
@@ -305,6 +349,14 @@ def camp_balance(player_count, role_config=None):
 
 
 def build_roles(player_count, role_config=None):
+    """
+    Génère et retourne une liste de rôles mélangés pour une partie, complétée par des Villageois.
+
+    :param player_count: Nombre de joueurs (int), doit être >= MIN_PLAYERS.
+    :param role_config: Dict optionnel {nom_rôle: quantité} (dict ou None).
+    :return: list[str] — liste des noms de rôles dans un ordre aléatoire.
+    :raises ValueError: Si player_count est trop faible ou si trop de rôles spéciaux sont configurés.
+    """
     if player_count < MIN_PLAYERS:
         raise ValueError(f"Il faut au moins {MIN_PLAYERS} joueurs.")
     roles = configured_special_roles(role_config)
@@ -317,6 +369,12 @@ def build_roles(player_count, role_config=None):
 
 
 def role_config_label(role_config):
+    """
+    Retourne une chaîne lisible résumant la configuration de rôles actifs, ex. : « Loup-garou, Voyante x2 ».
+
+    :param role_config: Dict {nom_rôle: quantité} (dict).
+    :return: str
+    """
     config = normalize_role_config(role_config)
     parts = []
     for role in AVAILABLE_ROLES:
@@ -327,6 +385,12 @@ def role_config_label(role_config):
 
 
 def count_alive_by_role(players):
+    """
+    Retourne un compteur du nombre de joueurs vivants par rôle.
+
+    :param players: Liste de dicts joueurs avec les clés 'alive' et 'role' (list[dict]).
+    :return: collections.Counter {nom_rôle: nombre_de_vivants}.
+    """
     counter = Counter()
     for p in players:
         if p["alive"]:

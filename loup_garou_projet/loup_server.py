@@ -28,6 +28,16 @@ class WerewolfServer:
     def __init__(self, host_name="Joueur", host=HOST, port=PORT,
                  max_players=MAX_PLAYERS, role_config=None,
                  ready_event: threading.Event = None):
+        """
+        Initialise le serveur TCP : socket, verrou, broadcaster UDP, modérateur de chat et état du lobby.
+
+        :param host_name: Nom du joueur hôte, utilisé pour nommer le salon (str).
+        :param host: Adresse d'écoute TCP (str), '0.0.0.0' par défaut.
+        :param port: Port TCP d'écoute (int), 5555 par défaut.
+        :param max_players: Nombre maximum de joueurs acceptés (int).
+        :param role_config: Configuration des rôles {nom_rôle: quantité} (dict ou None).
+        :param ready_event: Événement à déclencher quand le serveur est prêt à accepter des connexions (threading.Event ou None).
+        """
         self.host = host
         self.port = port
         self.server_name = f"Salon de {host_name}"
@@ -52,6 +62,7 @@ class WerewolfServer:
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def reset_lobby_state(self):
+        """Réinitialise tous les états de partie (joueurs, votes, phases, rôles spéciaux) pour un nouveau lobby."""
         self.players: list = []
         self.host_id = 0
         self.game_started = False
@@ -90,24 +101,49 @@ class WerewolfServer:
         self.pending_hunter_queue: list = []
 
     def _ensure_slot(self, player_id: int):
+        """
+        S'assure que la liste self.clients est assez longue pour contenir l'indice player_id.
+
+        :param player_id: Indice du joueur à garantir (int).
+        """
         while len(self.clients) <= player_id:
             self.clients.append(None)
 
     def connected_player_count(self) -> int:
+        """
+        Retourne le nombre de connexions TCP actives.
+
+        :return: int
+        """
         return sum(1 for c in self.clients if c is not None)
 
     def send_json(self, conn, data: dict):
+        """
+        Sérialise data en JSON et l'envoie sur la connexion TCP (terminé par '\\n').
+
+        :param conn: Socket client TCP (socket.socket).
+        :param data: Dictionnaire à envoyer (dict).
+        """
         try:
             conn.sendall((json.dumps(data) + "\n").encode("utf-8"))
         except OSError:
             pass
 
     def append_chat(self, author: str, message: str, system: bool = False, wolf_only: bool = False):
+        """
+        Ajoute un message au chat et conserve les 80 derniers messages.
+
+        :param author: Nom de l'auteur du message (str).
+        :param message: Contenu du message, tronqué à 220 caractères (str).
+        :param system: True si le message est un message système (bool).
+        :param wolf_only: True si le message est visible uniquement par les loups (bool).
+        """
         entry = {"author": author, "message": message[:220], "system": system, "wolf_only": wolf_only}
         self.chat_history.append(entry)
         self.chat_history = self.chat_history[-80:]
 
     def broadcast_snapshots(self):
+        """Envoie le snapshot d'état personnalisé à chaque joueur connecté."""
         for player in self.players:
             pid = player["id"]
             if pid >= len(self.clients):
@@ -123,6 +159,12 @@ class WerewolfServer:
     # ── Snapshots ────────────────────────────────────────────────────────────
 
     def player_snapshot(self, player_id: int) -> dict:
+        """
+        Construit et retourne le snapshot complet de l'état du jeu du point de vue du joueur donné.
+
+        :param player_id: Indice du joueur destinataire (int).
+        :return: dict contenant toutes les informations de phase, rôles, actions possibles et chat.
+        """
         player = self.players[player_id]
         alive_players = [p for p in self.players if p["alive"]]
         wolves_alive  = [p for p in alive_players if is_wolf_player(p)]
@@ -338,6 +380,11 @@ class WerewolfServer:
     # ── Gestion des connexions ────────────────────────────────────────────────
 
     def remove_client(self, player_id: int):
+        """
+        Déconnecte un joueur : ferme son slot, le marque mort/déconnecté et diffuse les snapshots.
+
+        :param player_id: Indice du joueur à déconnecter (int).
+        """
         if player_id < len(self.clients):
             self.clients[player_id] = None
         if player_id < len(self.players):
@@ -354,6 +401,13 @@ class WerewolfServer:
     # ── Handlers messages ────────────────────────────────────────────────────
 
     def handle_join(self, player_id: int, msg: dict):
+        """
+        Enregistre le joueur dans le lobby et diffuse la mise à jour à tous.
+
+        :param player_id: Indice du joueur qui rejoint (int).
+        :param msg: Message JSON reçu, avec la clé 'name' (dict).
+        :return: Snapshot d'état pour le joueur (dict).
+        """
         name = str(msg.get("name", "")).strip()[:20] or f"Joueur {player_id + 1}"
         while len(self.players) <= player_id:
             self.players.append({
@@ -372,6 +426,13 @@ class WerewolfServer:
         return self.player_snapshot(player_id)
 
     def update_role_config(self, player_id: int, msg: dict):
+        """
+        Met à jour la configuration des rôles du lobby si le demandeur est l'hôte.
+
+        :param player_id: Indice du joueur demandant la modification (int).
+        :param msg: Message JSON avec la clé 'role_config' (dict).
+        :return: Snapshot d'état ou dict d'erreur (dict).
+        """
         if player_id != self.host_id:
             return {"type": "error", "message": "Seul l'hote peut modifier les roles."}
         if self.game_started or self.phase != "lobby":
@@ -389,6 +450,13 @@ class WerewolfServer:
         return self.player_snapshot(player_id)
 
     def update_max_players(self, player_id: int, msg: dict):
+        """
+        Modifie le nombre maximum de joueurs du salon si le demandeur est l'hôte.
+
+        :param player_id: Indice du joueur demandant la modification (int).
+        :param msg: Message JSON avec la clé 'max_players' (dict).
+        :return: Snapshot d'état ou dict d'erreur (dict).
+        """
         if player_id != self.host_id:
             return {"type": "error", "message": "Seul l'hote peut modifier le nombre de joueurs."}
         if self.game_started or self.phase != "lobby":
@@ -404,6 +472,12 @@ class WerewolfServer:
         return self.player_snapshot(player_id)
 
     def start_game(self, player_id: int):
+        """
+        Lance la partie si l'hôte le demande et que le salon est complet et valide.
+
+        :param player_id: Indice du joueur demandant le lancement (int).
+        :return: None si succès, dict d'erreur sinon.
+        """
         if player_id != self.host_id:
             return {"type": "error", "message": "Seul l'hote peut lancer la partie."}
         active = [p for p in self.players if p.get("connected")]
@@ -458,9 +532,15 @@ class WerewolfServer:
     # ── Phases ───────────────────────────────────────────────────────────────
 
     def alive_ids(self) -> list:
+        """
+        Retourne la liste des ID des joueurs encore vivants et connectés.
+
+        :return: list[int]
+        """
         return [p["id"] for p in self.players if p.get("connected") and p["alive"]]
 
     def start_night(self):
+        """Démarre une nouvelle nuit : réinitialise les votes, définit l'étape de nuit initiale et diffuse les snapshots."""
         self.phase = "night"
         self.day_count += 1
         self.last_deaths = []
@@ -564,6 +644,11 @@ class WerewolfServer:
                 break
 
     def resolve_wolves_if_ready(self) -> bool:
+        """
+        Calcule la cible des loups si tous les loups ont voté.
+
+        :return: True si la cible est déterminée ou s'il n'y a aucun loup (bool).
+        """
         wolves = [p for p in self.players
                   if p.get("connected") and p["alive"] and is_wolf_player(p)]
         if wolves and len(self.wolf_votes) == len(wolves):
@@ -572,6 +657,7 @@ class WerewolfServer:
         return self.pending_wolf_target is not None or not wolves
 
     def resolve_night_if_ready(self):
+        """Déclenche la résolution de nuit uniquement si toutes les étapes de nuit sont terminées."""
         if self.night_step != "done":
             return
         self._resolve_night()
@@ -639,6 +725,7 @@ class WerewolfServer:
     # ── Résolution de nuit ────────────────────────────────────────────────────
 
     def _resolve_night(self):
+        """Applique toutes les morts de la nuit (loups, poison, Salvateur, Villageois Maudit), gère les chaînes et passe au jour."""
         deaths: set = set()
         salvateur_protected = self.pending_night.get("salvateur_protected")
         infected_this_night = self.pending_night.get("infected_target")
@@ -737,6 +824,13 @@ class WerewolfServer:
     # ── Actions de nuit ──────────────────────────────────────────────────────
 
     def handle_night_action(self, player_id: int, msg: dict):
+        """
+        Traite l'action de nuit d'un joueur selon son rôle et l'étape courante.
+
+        :param player_id: Indice du joueur agissant (int).
+        :param msg: Message JSON avec les clés 'action', 'target', 'targets' (dict).
+        :return: Snapshot d'état ou dict d'erreur (dict).
+        """
         if self.phase != "night" and not self.pending_hunter_queue:
             return {"type": "error", "message": "Ce n'est pas la nuit."}
         player = self.players[player_id]
@@ -1151,6 +1245,13 @@ class WerewolfServer:
         return {"type": "error", "message": "Action inconnue."}
 
     def handle_vote(self, player_id: int, msg: dict):
+        """
+        Enregistre le vote diurne d'un joueur et résout l'élimination quand tous ont voté.
+
+        :param player_id: Indice du joueur qui vote (int).
+        :param msg: Message JSON avec la clé 'target' (dict).
+        :return: Snapshot d'état ou dict d'erreur (dict).
+        """
         if self.phase != "day":
             return {"type": "error", "message": "Ce n'est pas le moment de voter."}
         if not self.players[player_id]["alive"]:
@@ -1210,6 +1311,13 @@ class WerewolfServer:
         return self.player_snapshot(player_id)
 
     def handle_chat(self, player_id: int, msg: dict):
+        """
+        Traite un message de chat : applique la modération, filtre les loups la nuit et diffuse à tous.
+
+        :param player_id: Indice de l'auteur du message (int).
+        :param msg: Message JSON avec la clé 'message' (dict).
+        :return: Snapshot d'état (dict).
+        """
         raw = str(msg.get("message", "")).strip()
         if not raw:
             return self.player_snapshot(player_id)
@@ -1235,6 +1343,12 @@ class WerewolfServer:
     # ── Boucle serveur ───────────────────────────────────────────────────────
 
     def handle_client(self, conn, player_id: int):
+        """
+        Boucle de réception TCP pour un joueur : lit les messages JSON ligne par ligne et dispatche les handlers.
+
+        :param conn: Socket TCP du joueur (socket.socket).
+        :param player_id: Indice du joueur connecté (int).
+        """
         buf = ""
         try:
             while self.running:
@@ -1283,6 +1397,7 @@ class WerewolfServer:
                 pass
 
     def shutdown(self):
+        """Arrête le serveur proprement : notifie les clients, ferme toutes les connexions et le socket TCP."""
         self.running = False
         self.broadcaster.stop()
         with self.lock:
@@ -1303,6 +1418,7 @@ class WerewolfServer:
             pass
 
     def serve_forever(self):
+        """Démarre le serveur TCP : bind, écoute, annonce UDP, et accepte les connexions dans une boucle infinie."""
         try:
             self.server.bind((self.host, self.port))
         except OSError as e:
