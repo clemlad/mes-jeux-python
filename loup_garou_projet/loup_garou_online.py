@@ -1453,10 +1453,19 @@ class WerewolfOnlineGame:
         # Affiche l'IP locale pour l'hôte (visible uniquement en phase lobby)
         if self.phase == "lobby" and self.is_host():
             my_ip = get_local_ip()
-            ip_label = f"Ton IP : {my_ip}"
-            draw_text(self.screen, ip_label,
-                      f["small"], GOLD_WARM,
-                      topleft=(self.top_rect.x + 12, self.top_rect.y + 8))
+            copied = (self.t - self._ip_copied_at) < 2.0 if hasattr(self, "_ip_copied_at") else False
+            ip_label = f"Ton IP : {my_ip}  ✓ Copié !" if copied else f"Ton IP : {my_ip}  [clic pour copier]"
+            ip_color = GOLD_PALE if copied else GOLD_WARM
+            ip_surf  = f["small"].render(ip_label, True, ip_color)
+            self._ip_label_rect = pygame.Rect(
+                self.top_rect.x + 12, self.top_rect.y + 8,
+                ip_surf.get_width(), ip_surf.get_height())
+            # Fond de survol si la souris est dessus
+            if self._ip_label_rect.collidepoint(pygame.mouse.get_pos()):
+                hover = pygame.Surface((self._ip_label_rect.width + 8, self._ip_label_rect.height + 4), pygame.SRCALPHA)
+                hover.fill((255, 200, 80, 40))
+                self.screen.blit(hover, (self._ip_label_rect.x - 4, self._ip_label_rect.y - 2))
+            self.screen.blit(ip_surf, (self._ip_label_rect.x, self._ip_label_rect.y))
             draw_text(self.screen, "(donne cette IP aux autres joueurs)",
                       f["xs"] if "xs" in f else f["small"], GREY_DIM,
                       topleft=(self.top_rect.x + 12, self.top_rect.y + 32))
@@ -1516,6 +1525,19 @@ class WerewolfOnlineGame:
 
         :param event: Événement Pygame à traiter (pygame.event.Event).
         """
+        # Clic sur l'IP de l'hôte → copie dans le presse-papier
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if (self.phase == "lobby" and self.is_host()
+                    and hasattr(self, "_ip_label_rect")
+                    and self._ip_label_rect.collidepoint(event.pos)):
+                try:
+                    pygame.scrap.init()
+                    pygame.scrap.put(pygame.SCRAP_TEXT, get_local_ip().encode("utf-8"))
+                except Exception:
+                    pass
+                self._ip_copied_at = self.t
+                return
+
         if event.type == pygame.MOUSEWHEEL:
             pos = pygame.mouse.get_pos()
             if self.chat_rect.collidepoint(pos):
