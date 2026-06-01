@@ -17,6 +17,7 @@ from loup_shared import (
     camp_balance, min_players_for_config, normalize_role_config, role_config_error,
     is_wolf_role, is_wolf_player,
 )
+from server_discovery import get_local_ip
 from loup_ui_theme import (
     WOLF_RED, BLOOD_RED,
     MIST_PURPLE, MIST_LIGHT,
@@ -1449,6 +1450,16 @@ class WerewolfOnlineGame:
         draw_text(self.screen, title, f["title"], MOON_SILVER,
                   center=(self.top_rect.centerx - 55, self.top_rect.centery), shadow=True)
         self.btn_sync.draw(self.screen, f["xs"], pygame.mouse.get_pos())
+        # Affiche l'IP locale pour l'hôte (visible uniquement en phase lobby)
+        if self.phase == "lobby" and self.is_host():
+            my_ip = get_local_ip()
+            ip_label = f"Ton IP : {my_ip}"
+            draw_text(self.screen, ip_label,
+                      f["small"], GOLD_WARM,
+                      topleft=(self.top_rect.x + 12, self.top_rect.y + 8))
+            draw_text(self.screen, "(donne cette IP aux autres joueurs)",
+                      f["xs"] if "xs" in f else f["small"], GREY_DIM,
+                      topleft=(self.top_rect.x + 12, self.top_rect.y + 32))
 
         if self.state == "connecting":
             draw_text(self.screen, "Connexion au serveur...", f["big"], MOON_SILVER,
