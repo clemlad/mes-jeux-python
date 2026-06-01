@@ -141,7 +141,7 @@ def draw_glass_panel(surface: pygame.Surface, rect: pygame.Rect,
 
 
 def draw_text(surface: pygame.Surface, text: str, font: pygame.font.Font,
-              color, center=None, topleft=None, shadow: bool = False) -> pygame.Rect:
+              color, center=None, topleft=None, topright=None, shadow: bool = False) -> pygame.Rect:
     """
     Dessine du texte sur une surface, optionnellement avec une ombre portée.
 
@@ -151,6 +151,7 @@ def draw_text(surface: pygame.Surface, text: str, font: pygame.font.Font,
     :param color: Couleur du texte (tuple RGB ou RGBA).
     :param center: Coordonnées (x, y) du centre (tuple[int, int] ou None).
     :param topleft: Coordonnées (x, y) du coin supérieur gauche (tuple[int, int] ou None).
+    :param topright: Coordonnées (x, y) du coin supérieur droit (tuple[int, int] ou None).
     :param shadow: Si True, dessine une ombre noire décalée de 2px (bool).
     :return: pygame.Rect du texte rendu.
     """
@@ -161,6 +162,8 @@ def draw_text(surface: pygame.Surface, text: str, font: pygame.font.Font,
             sr.center = (center[0] + 2, center[1] + 2)
         elif topleft:
             sr.topleft = (topleft[0] + 2, topleft[1] + 2)
+        elif topright:
+            sr.topright = (topright[0] + 2, topright[1] + 2)
         surface.blit(sh, sr)
     img = font.render(text, True, color)
     r = img.get_rect()
@@ -168,6 +171,8 @@ def draw_text(surface: pygame.Surface, text: str, font: pygame.font.Font,
         r.center = center
     if topleft is not None:
         r.topleft = topleft
+    if topright is not None:
+        r.topright = topright
     surface.blit(img, r)
     return r
 
