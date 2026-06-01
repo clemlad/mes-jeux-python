@@ -313,6 +313,20 @@ class WerewolfServer:
 
         fox_result = self.pending_night.get(f"fox_result_{player_id}")
 
+        # Message d'amoureux : visible uniquement par les deux amoureux et Cupidon
+        lovers_msg = None
+        lovers_ids = self.pending_night.get("lovers_ids", [])
+        if (self.pending_night.get("lovers_msg")
+                and (player_id in lovers_ids or current_role == "Cupidon")):
+            lovers_msg = self.pending_night["lovers_msg"]
+
+        # Votes des loups : visible uniquement par les loups (affiche qui a voté pour qui)
+        wolf_votes_visible = {}
+        if is_wolf:
+            for voter_id, tgt_id in self.wolf_votes.items():
+                if voter_id < len(self.players) and tgt_id < len(self.players):
+                    wolf_votes_visible[self.players[voter_id]["name"]] = self.players[tgt_id]["name"]
+
         lover_partner_name = None
         if player.get("is_lover") and player.get("lover_id") is not None:
             lid = player["lover_id"]
@@ -375,6 +389,8 @@ class WerewolfServer:
             "charmed_list":           charmed_list,
             "fueled_list":            fueled_list,
             "salvateur_last_name":    salvateur_last_name,
+            "lovers_msg":             lovers_msg,
+            "wolf_votes_visible":     wolf_votes_visible,
         }
 
     # ── Gestion des connexions ────────────────────────────────────────────────
@@ -879,13 +895,14 @@ class WerewolfServer:
             self.lovers = [p1, p2]
             self.cupidon_done = True
             self.pending_night["cupidon_done"] = True
+            # Message discret visible de tous (pas de noms)
             self.append_chat("Systeme",
-                             f"Cupidon a lancé ses flèches dans la nuit...",
+                             "Cupidon a lancé ses flèches dans la nuit...",
                              system=True, wolf_only=False)
+            # Message avec les noms : stocké séparément, envoyé uniquement aux concernés
             n1, n2 = self.players[p1]["name"], self.players[p2]["name"]
-            self.append_chat("Systeme",
-                             f"{n1} et {n2} sont tombés amoureux !",
-                             system=True, wolf_only=False)
+            self.pending_night["lovers_msg"] = f"{n1} et {n2} sont tombés amoureux !"
+            self.pending_night["lovers_ids"] = [p1, p2]
             self._next_night_step()
             self._advance_if_no_role()
             if self.night_step == "done":
