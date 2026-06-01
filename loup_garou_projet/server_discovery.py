@@ -87,7 +87,8 @@ class ServerBroadcaster:
 
     def _run(self):
         """Boucle d'envoi : reconstruit le payload à chaque itération pour refléter
-        les valeurs les plus récentes (joueurs connectés, config des rôles)."""
+        les valeurs les plus récentes (joueurs connectés, config des rôles).
+        Envoie en broadcast ET en loopback pour que la machine hôte se détecte elle-même."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         payload = {
@@ -99,6 +100,8 @@ class ServerBroadcaster:
             "max_players": self.max_players,
             "roles":       self.role_summary,
         }
+        # Adresses de destination : broadcast réseau + loopback (auto-découverte)
+        destinations = ["255.255.255.255", "127.0.0.1"]
         try:
             while self.running:
                 # Mise à jour des champs dynamiques avant chaque envoi
@@ -106,7 +109,11 @@ class ServerBroadcaster:
                 payload["max_players"] = self.max_players
                 payload["roles"]       = self.role_summary
                 data = json.dumps(payload).encode("utf-8")
-                sock.sendto(data, ("255.255.255.255", DISCOVERY_PORT))
+                for dest in destinations:
+                    try:
+                        sock.sendto(data, (dest, DISCOVERY_PORT))
+                    except OSError:
+                        pass
                 time.sleep(DISCOVERY_INTERVAL)
         finally:
             sock.close()
@@ -138,6 +145,13 @@ class ServerDiscovery:
         """Écoute les paquets UDP et met à jour found_servers."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # SO_REUSEPORT permet au broadcaster et au listener de coexister sur le même port
+        # (Linux/macOS uniquement — ignoré silencieusement sur Windows)
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except OSError:
+                pass
         sock.bind(("", DISCOVERY_PORT))
         sock.settimeout(1.0)   # timeout pour pouvoir vérifier self.running régulièrement
         try:
