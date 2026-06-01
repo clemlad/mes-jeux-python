@@ -126,6 +126,10 @@ class Launcher:
         self.host_thread   = None
         self.selected_idx  = 0
         self.row_rects: list = []
+        # Connexion directe par IP (fallback si broadcast bloqué)
+        self.ip_input       = InputBox(placeholder="Ex : 192.168.1.42", max_len=15)
+        self.btn_connect_ip = Button("CONNEXION DIRECTE", BTN_PRIMARY, BTN_PRIMARY_H, icon="→")
+        self.show_ip_input  = False
 
     # ── Utilitaires ──────────────────────────────────────────────────────────
 
@@ -321,12 +325,19 @@ class Launcher:
     def layout_join(self) -> pygame.Rect:
         """
         Positionne les widgets de l'écran de liste des salons et retourne le rectangle du panneau.
+        Réserve une zone en bas pour la connexion directe par IP.
 
         :return: pygame.Rect occupant presque toute la fenêtre.
         """
         w, h = self.screen.get_size()
-        p = pygame.Rect(60, 50, w - 120, h - 120)
-        self.btn_back.set_rect((p.x, p.bottom + 10, 180, 42))
+        # On laisse 110px en bas pour le bloc connexion directe
+        p = pygame.Rect(60, 50, w - 120, h - 180)
+        self.btn_back.set_rect((p.x, p.bottom + 70, 180, 42))
+        # Champ IP + bouton en bas du panneau
+        ip_y = p.bottom + 14
+        ip_w = min(280, p.width - 240)
+        self.ip_input.set_rect((p.x, ip_y, ip_w, 44))
+        self.btn_connect_ip.set_rect((p.x + ip_w + 12, ip_y, 220, 44))
         return p
 
     # ── Dessin ───────────────────────────────────────────────────────────────
@@ -403,18 +414,25 @@ class Launcher:
         self.btn_back.draw  (self.screen, f["medium"], mouse)
 
     def draw_join(self):
-        """Dessine l'écran de liste des salons : panneau vitré, lignes de serveurs cliquables et bouton retour."""
+        """Dessine l'écran de liste des salons avec connexion directe par IP en bas."""
         f = self.fonts()
         p = self.layout_join()
+        mouse = pygame.mouse.get_pos()
+
         draw_glass_panel(self.screen, p, radius=22)
         draw_text(self.screen, "Salons disponibles", f["big"], MOON_SILVER,
                   center=(p.centerx, p.y + 44), shadow=True)
+
         self.row_rects = []
         servers = self.discovery.get_servers()
         y = p.y + 90
         if not servers:
-            draw_text(self.screen, "Aucun salon trouvé sur le réseau local…",
-                      f["medium"], GREY_DIM, center=(p.centerx, p.centery))
+            draw_text(self.screen,
+                      "Aucun salon détecté automatiquement.",
+                      f["medium"], GREY_DIM, center=(p.centerx, p.y + p.height // 2 - 16))
+            draw_text(self.screen,
+                      "Utilise la connexion directe ci-dessous si le broadcast est bloqué.",
+                      f["small"], GOLD_PALE, center=(p.centerx, p.y + p.height // 2 + 18))
         else:
             self.selected_idx = max(0, min(self.selected_idx, len(servers) - 1))
             for i, srv in enumerate(servers):
@@ -433,7 +451,6 @@ class Launcher:
                           f"Roles : {srv.get('roles', '')}",
                           f["xs"] if "xs" in f else f["small"], GREY_DIM,
                           topleft=(row.x + 60, row.y + 58))
-                # Icône
                 draw_text(self.screen, "🌕", f["big"], GOLD_WARM,
                           center=(row.x + 34, row.centery))
                 if sel:
@@ -441,14 +458,29 @@ class Launcher:
                               GOLD_WARM, topleft=(row.right - 200, row.y + 30))
                 self.row_rects.append((i, row))
                 y += 92
-        mouse = pygame.mouse.get_pos()
-        self.btn_back.draw(self.screen, f["small"], mouse)
-        draw_text(self.screen, "Haut/Bas pour naviguer  •  Entree pour rejoindre",
+
+        # ── Bloc connexion directe par IP ─────────────────────────────────────
+        sep_y = p.bottom + 8
+        w_total = self.screen.get_width()
+        pygame.draw.line(self.screen, (70, 55, 100),
+                         (p.x, sep_y), (p.x + p.width, sep_y), 1)
+        draw_text(self.screen, "Connexion directe par IP",
+                  f["small"], GOLD_PALE,
+                  topleft=(p.x, sep_y + 4))
+        # Affiche l'IP locale pour que l'hôte puisse la communiquer facilement
+        from server_discovery import get_local_ip
+        my_ip = get_local_ip()
+        draw_text(self.screen, f"Ton IP : {my_ip}",
                   f["xs"] if "xs" in f else f["small"], GREY_DIM,
-                  center=(p.centerx, p.bottom + 20))
+                  topleft=(p.x + p.width - 230, sep_y + 4))
+        self.ip_input.draw(self.screen, f["medium"])
+        self.btn_connect_ip.draw(self.screen, f["medium"], mouse)
+        # ──────────────────────────────────────────────────────────────────────
+
+        self.btn_back.draw(self.screen, f["small"], mouse)
         if self.message:
             draw_text(self.screen, self.message, f["small"], WOLF_RED,
-                      center=(p.centerx, p.bottom + 40))
+                      center=(p.centerx, p.bottom + 118))
 
     # ── Événements ───────────────────────────────────────────────────────────
 
@@ -499,16 +531,40 @@ class Launcher:
             elif self.btn_back.is_clicked(event.pos):
                 self.reset_state()
 
+    def _connect_direct_ip(self):
+        """Tente une connexion directe à l'IP saisie dans ip_input."""
+        ip = self.ip_input.text.strip()
+        if not ip:
+            self.message = "Entre une adresse IP avant de te connecter."
+            return
+        # Validation basique : 4 blocs numériques séparés par des points
+        parts = ip.split(".")
+        if len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+            self.message = f"Adresse IP invalide : {ip}"
+            return
+        self.message = ""
+        self.launch_online_game(ip, shutdown_after=False)
+
     def handle_join(self, event):
         """
-        Traite les événements de l'écran de liste des salons : clic sur une ligne, navigation clavier et retour.
+        Traite les événements de l'écran de liste des salons : clic sur une ligne,
+        connexion directe par IP, navigation clavier et retour.
 
         :param event: Événement Pygame à traiter (pygame.event.Event).
         """
+        # Le champ IP capture la frappe en priorité
+        if self.ip_input.handle_event(event):
+            # Entrée validée depuis le champ IP → connexion directe
+            self._connect_direct_ip()
+            return
+
         servers = self.discovery.get_servers()
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.btn_back.is_clicked(event.pos):
                 self.state = "online"
+                return
+            if self.btn_connect_ip.is_clicked(event.pos):
+                self._connect_direct_ip()
                 return
             for i, rect in self.row_rects:
                 if rect.collidepoint(event.pos):
@@ -522,7 +578,7 @@ class Launcher:
                 self.selected_idx = min(self.selected_idx + 1, len(servers) - 1)
             elif event.key == pygame.K_UP and servers:
                 self.selected_idx = max(self.selected_idx - 1, 0)
-            elif event.key == pygame.K_RETURN and servers:
+            elif event.key == pygame.K_RETURN and servers and not self.ip_input.active:
                 self.join_selected()
 
     # ── Boucle principale ────────────────────────────────────────────────────
