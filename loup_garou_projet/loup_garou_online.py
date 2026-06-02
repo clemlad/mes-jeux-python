@@ -205,6 +205,8 @@ class WerewolfOnlineGame:
         self.fueled_list: list        = []
         self.salvateur_last_name      = None
         self.wolf_votes_visible: dict = {}   # {nom_votant: nom_cible} — loups seulement
+        self.day_votes_visible:  dict = {}   # {nom_votant: nom_cible} — tout le monde
+        self.witch_save_blocked       = False  # True si père des loups a infecté cette nuit
 
         # Boutons de base
         self.btn_start         = Button("LANCER LA PARTIE",  BTN_SUCCESS, BTN_SUCCESS_H)
@@ -216,7 +218,8 @@ class WerewolfOnlineGame:
         self.btn_father_infect = Button("INFECTER",          (140, 60, 10),  (180, 90, 20))
         self.btn_father_skip   = Button("PASSER",            BTN_NEUTRAL,    BTN_NEUTRAL_H)
         self.btn_send_chat     = Button("ENVOYER",           BTN_PRIMARY,    BTN_PRIMARY_H)
-        self.btn_end           = Button("RETOUR AU MENU",    BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.btn_end           = Button("RETOUR AU MENU SERVEUR", BTN_NEUTRAL,    BTN_NEUTRAL_H)
+        self.btn_dawn_advance  = Button("☀  PASSER AU JOUR",     BTN_SUCCESS,    BTN_SUCCESS_H)
         self.chat_input        = InputBox(placeholder="Écris un message...", max_len=220)
 
         # Nouveaux boutons pour les rôles additionnels
@@ -316,6 +319,10 @@ class WerewolfOnlineGame:
         ew = min(300, full_w)
         self.btn_end.set_rect((self.center_rect.centerx - ew // 2, by, ew, 44))
 
+        # Phase aube : bouton "Passer au Jour" (hôte seulement)
+        daw = min(260, full_w)
+        self.btn_dawn_advance.set_rect((self.center_rect.centerx - daw // 2, by, daw, 44))
+
         self.btn_sync.set_rect     ((self.top_rect.right - 110, self.top_rect.y + 13, 90, 38))
         self.chat_input.set_rect   ((self.chat_rect.x + 12, self.chat_rect.bottom - 54,
                                      self.chat_rect.width - 110, 40))
@@ -376,6 +383,7 @@ class WerewolfOnlineGame:
                 self.max_players       = msg.get("max_players", self.max_players)
                 self.witch_heal_available   = msg.get("witch_heal_available", self.witch_heal_available)
                 self.witch_poison_available = msg.get("witch_poison_available", self.witch_poison_available)
+                self.witch_save_blocked     = msg.get("witch_save_blocked", False)
                 self.father_can_infect = msg.get("father_can_infect", False)
                 self.night_step        = msg.get("night_step", "wolves")
                 self.role_config       = normalize_role_config(
@@ -393,6 +401,7 @@ class WerewolfOnlineGame:
                 self.fueled_list           = msg.get("fueled_list", [])
                 self.salvateur_last_name   = msg.get("salvateur_last_name")
                 self.wolf_votes_visible    = msg.get("wolf_votes_visible", {})
+                self.day_votes_visible     = msg.get("day_votes_visible", {})
 
                 # Message amoureux reçu uniquement par les concernés
                 lovers_msg = msg.get("lovers_msg")
@@ -997,8 +1006,10 @@ class WerewolfOnlineGame:
             return
 
         phase_labels = {
-            "night": (f"  Nuit {self.day_count}", MOON_SILVER),
-            "day":   (f"  Jour {self.day_count}",  GOLD_WARM),
+            "night":      (f"  Nuit {self.day_count}", MOON_SILVER),
+            "day":        (f"  Jour {self.day_count}",  GOLD_WARM),
+            "dawn":       (f"  Aube {self.day_count}",  (255, 220, 120)),
+            "hunter_day": (f"  Jour {self.day_count} — Chasseur", WOLF_RED),
         }
         ph_txt, ph_col = phase_labels.get(self.phase, (self.phase.capitalize(), WHITE_SOFT))
         draw_text(self.screen, ph_txt, f["big"], ph_col,
@@ -1053,9 +1064,14 @@ class WerewolfOnlineGame:
             line(f"Votes : {self.votes_cast}/{self.votes_needed}",
                  GOLD_WARM if self.has_voted else GREY_DIM)
             if self.has_voted:
-                line("Vote enregistre - en attente des autres joueurs.", CYAN_COOL)
+                line("Vote enregistré - en attente des autres joueurs.", CYAN_COOL)
             elif self.can_act:
-                line("Selectionnez un joueur puis cliquez VALIDER.", GOLD_PALE)
+                line("Sélectionnez un joueur puis cliquez VALIDER.", GOLD_PALE)
+            # Affichage visuel de qui vote qui
+            if self.day_votes_visible:
+                line("Votes en cours :", GOLD_WARM)
+                for voter, cible in self.day_votes_visible.items():
+                    line(f"  {voter} → {cible}", (180, 200, 80))
 
         # Infos de nuit
         if self.phase == "night":
@@ -1098,7 +1114,20 @@ class WerewolfOnlineGame:
             line(f"Interdit cette nuit : {self.salvateur_last_name}", GREY_DIM)
 
         if self.last_deaths:
-            line("Elimine(s) : " + ", ".join(self.last_deaths), BLOOD_RED)
+            line("Éliminé(s) : " + ", ".join(self.last_deaths), BLOOD_RED)
+
+        # Phase aube : annonce des morts à tous avant le vote du jour
+        if self.phase == "dawn":
+            if self.last_deaths:
+                line("☽  Cette nuit, les morts sont :", (255, 180, 80))
+                for name in self.last_deaths:
+                    line(f"  💀 {name}", BLOOD_RED)
+            else:
+                line("☽  Personne n'est mort cette nuit !", (100, 220, 120))
+            if self.is_host():
+                line("(Hôte) Cliquez sur 'PASSER AU JOUR' pour lancer le vote.", GOLD_PALE)
+            else:
+                line("En attente que l'hôte passe au jour...", GREY_DIM)
 
         pygame.draw.line(self.screen, (58, 48, 88),
                          (self.center_rect.x + 18, y + 4),
@@ -1118,9 +1147,15 @@ class WerewolfOnlineGame:
 
     def _draw_action_buttons(self, f: dict, mouse, role: str):
         """Sélectionne et affiche les boutons appropriés selon le contexte."""
-        # Chasseur en attente (priorité absolue, peut être day ou night)
+        # Chasseur en attente (priorité absolue, peut être day ou night ou hunter_day)
         if self.is_hunter_turn and self.can_act:
             self._draw_hunter_buttons(f, mouse)
+            return
+
+        # Phase aube : bouton pour passer au jour (hôte seulement)
+        if self.phase == "dawn":
+            if self.is_host():
+                self.btn_dawn_advance.draw(self.screen, f["small"], mouse, enabled=True)
             return
 
         if self.phase == "night" and self.can_act:
@@ -1231,11 +1266,10 @@ class WerewolfOnlineGame:
     def _draw_witch_buttons(self, f: dict, mouse):
         """
         Affiche les boutons SAUVER, EMPOISONNER et PASSER pour la Sorcière.
-
-        :param f: Dictionnaire des polices (dict).
-        :param mouse: Position actuelle de la souris (tuple[int, int]).
         """
-        save_ok   = (self.witch_heal_available and self.night_target_name is not None)
+        save_ok   = (self.witch_heal_available
+                     and self.night_target_name is not None
+                     and not self.witch_save_blocked)
         poison_ok = (self.witch_poison_available and self.selected_target is not None)
         self.btn_save.text   = ("SAUVER " + (self.night_target_name or "")[:10]).strip()
         self.btn_poison.text = "EMPOISONNER"
@@ -1244,10 +1278,16 @@ class WerewolfOnlineGame:
         self.btn_poison.draw(self.screen, f["xs"], mouse, enabled=poison_ok)
         self.btn_skip.draw  (self.screen, f["xs"], mouse, enabled=True)
         iy = self.btn_save.rect.y - 18
-        draw_text(self.screen,
-                  "Potion soin" if self.witch_heal_available else "Soin epuise",
-                  f["xs"], GOLD_WARM if self.witch_heal_available else GREY_DIM,
-                  topleft=(self.btn_save.rect.x, iy))
+        if self.witch_save_blocked:
+            draw_text(self.screen,
+                      "Infecté par le Père des Loups — soin impossible !",
+                      f["xs"], WOLF_RED,
+                      topleft=(self.btn_save.rect.x, iy))
+        else:
+            draw_text(self.screen,
+                      "Potion soin" if self.witch_heal_available else "Soin épuisé",
+                      f["xs"], GOLD_WARM if self.witch_heal_available else GREY_DIM,
+                      topleft=(self.btn_save.rect.x, iy))
         draw_text(self.screen,
                   "Potion mort" if self.witch_poison_available else "Mort epuisee",
                   f["xs"], (160, 60, 180) if self.witch_poison_available else GREY_DIM,
@@ -1650,6 +1690,12 @@ class WerewolfOnlineGame:
         if self.phase == "end" and self.btn_end.is_clicked(event.pos):
             self.running = False
             return
+
+        # Phase aube : seul l'hôte passe au jour
+        if self.phase == "dawn" and self.is_host():
+            if self.btn_dawn_advance.is_clicked(event.pos):
+                self.network.send({"type": "dawn_advance"})
+                return
 
         # Sélection joueur (inclut multi-select)
         if self._try_select_player(event.pos):

@@ -177,7 +177,8 @@ class WerewolfServer:
 
         # Chasseur en attente
         is_hunter_turn = (bool(self.pending_hunter_queue)
-                          and self.pending_hunter_queue[0] == player_id)
+                          and self.pending_hunter_queue[0] == player_id
+                          and self.phase in ("night", "day", "hunter_day", "dawn"))
         if is_hunter_turn and player["alive"] is False:
             can_act = True
             action_hint = "Vous avez été éliminé ! Désignez un joueur à emporter avec vous."
@@ -293,6 +294,9 @@ class WerewolfServer:
 
         witch_heal_available   = (current_role == "Sorcière" and not self.witch_heal_used)
         witch_poison_available = (current_role == "Sorcière" and not self.witch_poison_used)
+        # La sorcière ne peut pas sauver si le père des loups a infecté cette nuit
+        witch_save_blocked = (current_role == "Sorcière"
+                              and self.pending_night.get("infected_target") is not None)
 
         # Chat : la nuit seuls les loups (et infectés) peuvent écrire
         can_chat = True
@@ -326,6 +330,12 @@ class WerewolfServer:
             for voter_id, tgt_id in self.wolf_votes.items():
                 if voter_id < len(self.players) and tgt_id < len(self.players):
                     wolf_votes_visible[self.players[voter_id]["name"]] = self.players[tgt_id]["name"]
+
+        # Votes du jour : visibles par tous les joueurs vivants
+        day_votes_visible = {}
+        for voter_id, tgt_id in self.day_votes.items():
+            if voter_id < len(self.players) and tgt_id < len(self.players):
+                day_votes_visible[self.players[voter_id]["name"]] = self.players[tgt_id]["name"]
 
         lover_partner_name = None
         if player.get("is_lover") and player.get("lover_id") is not None:
@@ -375,6 +385,7 @@ class WerewolfServer:
             "chat_history":           visible_chat,
             "witch_heal_available":   witch_heal_available,
             "witch_poison_available": witch_poison_available,
+            "witch_save_blocked":     witch_save_blocked,
             "can_chat":               can_chat,
             "has_voted":              has_voted,
             "votes_cast":             len(self.day_votes),
@@ -391,6 +402,7 @@ class WerewolfServer:
             "salvateur_last_name":    salvateur_last_name,
             "lovers_msg":             lovers_msg,
             "wolf_votes_visible":     wolf_votes_visible,
+            "day_votes_visible":      day_votes_visible,
         }
 
     # ── Gestion des connexions ────────────────────────────────────────────────
@@ -795,11 +807,51 @@ class WerewolfServer:
         if self.winner is not None:
             self.phase   = "end"
             self.message = f"Victoire du camp : {self.winner} !"
+            self.broadcast_snapshots()
         else:
-            self.phase = "day"
-            self.message = ("Jour : " + ", ".join(self.last_deaths) + " éliminé(s). Votez."
+            # Phase aube : tout le monde voit les morts AVANT que le vote du jour commence
+            # Le chasseur aussi attend le matin pour agir
+            self.phase = "dawn"
+            if self.last_deaths:
+                self.message = ("Aube : " + ", ".join(self.last_deaths) +
+                                " éliminé(s) cette nuit. Cliquez sur 'Passer au jour' pour continuer.")
+            else:
+                self.message = "Aube : personne n'est mort cette nuit. Cliquez sur 'Passer au jour' pour continuer."
+            self.broadcast_snapshots()
+
+    def start_day_from_dawn(self, player_id: int):
+        """
+        Appelé quand l'hôte valide l'aube pour passer au vote du jour.
+        Si un Chasseur est en attente, c'est maintenant qu'il agit.
+        """
+        if self.phase != "dawn":
+            return self.player_snapshot(player_id)
+        if player_id != self.host_id:
+            return {"type": "error", "message": "Seul l'hôte peut passer au jour."}
+
+        # Chasseur(s) en attente (nuit) → agissent maintenant
+        if self.pending_hunter_queue:
+            hunter_id = self.pending_hunter_queue[0]
+            if self.players[hunter_id].get("connected"):
+                self.phase = "hunter_day"   # phase spéciale : chasseur agit avant le vote
+                self.message = (f"{self.players[hunter_id]['name']} (Chasseur) a été éliminé cette nuit ! "
+                                f"Il doit choisir un joueur à emporter avec lui !")
+                self.broadcast_snapshots()
+                return self.player_snapshot(player_id)
+            else:
+                self._auto_hunter_shoot(hunter_id)
+                self.pending_hunter_queue.pop(0)
+
+        self.winner = check_winner(self.players)
+        if self.winner is not None:
+            self.phase   = "end"
+            self.message = f"Victoire du camp : {self.winner} !"
+        else:
+            self.phase   = "day"
+            self.message = ("Jour : " + ", ".join(self.last_deaths) + " éliminé(s) cette nuit. Votez."
                             if self.last_deaths else "Jour : personne n'est mort cette nuit. Votez.")
         self.broadcast_snapshots()
+        return self.player_snapshot(player_id)
 
     def _auto_hunter_shoot(self, hunter_id: int):
         """Le Chasseur déconnecté tire aléatoirement."""
@@ -831,10 +883,16 @@ class WerewolfServer:
         if self.winner is not None:
             self.phase   = "end"
             self.message = f"Victoire du camp : {self.winner} !"
-        else:
-            self.phase = "day"
+        elif self.phase == "hunter_day":
+            # Chasseur de nuit → retour au vote du jour
+            self.phase   = "day"
             self.message = ("Jour : " + ", ".join(self.last_deaths) + " éliminé(s). Votez."
                             if self.last_deaths else "Jour : personne n'est mort cette nuit. Votez.")
+        else:
+            # Chasseur du jour → retour à la nuit
+            self.phase = "day"
+            self.message = ("Jour : " + ", ".join(self.last_deaths) + " éliminé(s). La nuit tombe..."
+                            if self.last_deaths else "Nuit.")
         self.broadcast_snapshots()
 
     # ── Actions de nuit ──────────────────────────────────────────────────────
@@ -1030,6 +1088,9 @@ class WerewolfServer:
                 return {"type": "error", "message": "Ce n'est pas encore le tour de la Sorcière."}
             if self.witch_heal_used:
                 return {"type": "error", "message": "Potion de soin déjà utilisée."}
+            # L'infecte père des loups : la sorcière ne peut pas sauver la victime infectée
+            if self.pending_night.get("infected_target") is not None:
+                return {"type": "error", "message": "L'Infect Père des Loups a agi — la sorcière ne peut pas contrer son pouvoir !"}
             self.pending_night["saved"]      = True
             self.pending_night["witch_done"] = True
             self.witch_heal_used = True
@@ -1307,6 +1368,7 @@ class WerewolfServer:
             if self.pending_hunter_queue:
                 hunter_id = self.pending_hunter_queue[0]
                 if self.players[hunter_id].get("connected"):
+                    self.phase = "hunter_day"
                     self.message = (f"{self.players[chosen]['name']} éliminé. "
                                     f"{self.players[hunter_id]['name']} (Chasseur) doit choisir sa cible !")
                     self.broadcast_snapshots()
@@ -1386,6 +1448,8 @@ class WerewolfServer:
                             response = self.update_role_config(player_id, msg)
                         elif kind == "start_game":
                             response = self.start_game(player_id)
+                        elif kind == "dawn_advance":
+                            response = self.start_day_from_dawn(player_id)
                         elif kind == "update_max_players":
                             response = self.update_max_players(player_id, msg)
                         elif kind == "night_action":
