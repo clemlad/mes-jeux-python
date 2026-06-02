@@ -408,6 +408,13 @@ def serialize_players_for(player_id, players, reveal_all=False):
     current_is_wolf_side = is_wolf_player(current_player) if current_player else False
     my_lover_id = current_player.get("lover_id") if current_player else None
 
+    # Récupère les amoureux côté serveur pour savoir qui peut voir "is_lover"
+    cupidon_id = None
+    for p in players:
+        if p.get("role") == "Cupidon":
+            cupidon_id = p["id"]
+            break
+
     for p in players:
         entry = {
             "id":             p["id"],
@@ -415,21 +422,35 @@ def serialize_players_for(player_id, players, reveal_all=False):
             "alive":          p["alive"],
             "revealed_role":  p.get("revealed_role"),
             "infected":       False,
-            "is_lover":       p.get("is_lover", False),
+            # is_lover visible uniquement : soi-même, son partenaire, Cupidon, fin de partie
+            "is_lover":       False,
+            "lover_id":       None,
             "is_charmed":     p.get("is_charmed", False),
             "is_fueled":      p.get("is_fueled", False),
             "wild_child_turned": False,
             "maudit_converted":  False,
         }
-        can_see = (reveal_all
-                   or p["id"] == player_id
-                   or (is_wolf_player(p) and current_is_wolf_side)
-                   or my_lover_id == p["id"])  # amoureux voient le rôle de leur partenaire
 
-        if can_see:
-            entry["role"]             = p["role"]
-            entry["infected"]         = p.get("infected", False)
-            entry["wild_child_turned"]= p.get("wild_child_turned", False)
-            entry["maudit_converted"] = p.get("maudit_converted", False)
+        can_see_role = (reveal_all
+                        or p["id"] == player_id
+                        or (is_wolf_player(p) and current_is_wolf_side)
+                        or my_lover_id == p["id"])
+
+        # Peut voir les infos d'amoureux si : soi-même, son partenaire amoureux, Cupidon, ou fin de partie
+        can_see_lover = (reveal_all
+                         or p["id"] == player_id
+                         or (current_player is not None and current_player.get("is_lover")
+                             and (p["id"] == my_lover_id or player_id == p.get("lover_id")))
+                         or player_id == cupidon_id)
+
+        if can_see_lover and p.get("is_lover"):
+            entry["is_lover"] = True
+            entry["lover_id"] = p.get("lover_id")
+
+        if can_see_role:
+            entry["role"]              = p["role"]
+            entry["infected"]          = p.get("infected", False)
+            entry["wild_child_turned"] = p.get("wild_child_turned", False)
+            entry["maudit_converted"]  = p.get("maudit_converted", False)
         data.append(entry)
     return data

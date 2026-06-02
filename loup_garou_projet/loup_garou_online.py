@@ -204,6 +204,7 @@ class WerewolfOnlineGame:
         self.charmed_list: list       = []
         self.fueled_list: list        = []
         self.salvateur_last_name      = None
+        self.wolf_votes_visible: dict = {}   # {nom_votant: nom_cible} — loups seulement
 
         # Boutons de base
         self.btn_start         = Button("LANCER LA PARTIE",  BTN_SUCCESS, BTN_SUCCESS_H)
@@ -391,6 +392,20 @@ class WerewolfOnlineGame:
                 self.charmed_list          = msg.get("charmed_list", [])
                 self.fueled_list           = msg.get("fueled_list", [])
                 self.salvateur_last_name   = msg.get("salvateur_last_name")
+                self.wolf_votes_visible    = msg.get("wolf_votes_visible", {})
+
+                # Message amoureux reçu uniquement par les concernés
+                lovers_msg = msg.get("lovers_msg")
+                if lovers_msg:
+                    # Ajoute au chat local si pas déjà présent
+                    already = any(e.get("message") == lovers_msg for e in self.chat_history)
+                    if not already:
+                        self.chat_history.append({
+                            "author": "[Systeme]",
+                            "message": lovers_msg,
+                            "system": True,
+                            "wolf_only": False,
+                        })
 
                 # Réinitialise la sélection à chaque changement de phase
                 if new_phase != self.prev_phase:
@@ -1046,6 +1061,11 @@ class WerewolfOnlineGame:
         if self.phase == "night":
             if self.night_target_name:
                 line(f"Victime des loups : {self.night_target_name}", WOLF_RED)
+            # Votes des loups (visible uniquement par les loups)
+            if self.wolf_votes_visible and self.night_step == "wolves":
+                line("Votes des loups :", WOLF_RED)
+                for voter, cible in self.wolf_votes_visible.items():
+                    line(f"  {voter} → {cible}", (200, 100, 100))
             if self.seer_result:
                 line(self.seer_result, CYAN_COOL)
             if self.fox_result:
@@ -1150,7 +1170,29 @@ class WerewolfOnlineGame:
         pill_h = 22
         sx = self.center_rect.x + 20
 
-        for idx, (step, label, col) in enumerate(NIGHT_STEP_INFO):
+        # Mapping étape → rôle requis (None = toujours présent)
+        STEP_ROLE_REQUIRED = {
+            "cupidon":    "Cupidon",
+            "wild_child": "Enfant sauvage",
+            "seer":       "Voyante",
+            "wolves":     None,
+            "father":     "Infect Père des Loups",
+            "witch":      "Sorcière",
+            "salvateur":  "Salvateur",
+            "fox":        "Renard",
+            "siren":      "Sirène",
+            "arsonist":   "Pyromane",
+        }
+        # Filtre : ne garder que les étapes dont le rôle est dans la config active
+        active_steps = []
+        for step, label, col in NIGHT_STEP_INFO:
+            required_role = STEP_ROLE_REQUIRED.get(step)
+            if required_role is None:
+                active_steps.append((step, label, col))
+            elif self.role_config.get(required_role, 0) > 0:
+                active_steps.append((step, label, col))
+
+        for idx, (step, label, col) in enumerate(active_steps):
             row = idx // n_per_row
             col_i = idx % n_per_row
             px = sx + col_i * (pill_w + 4)
